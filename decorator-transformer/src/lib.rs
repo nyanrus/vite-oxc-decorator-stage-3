@@ -129,8 +129,41 @@ mod tests {
         assert!(result.is_ok());
         if let Ok(res) = result {
             assert!(res.code.contains("class C"));
-            // Should have detected decorators
-            assert!(res.errors.len() > 0 || res.code.contains("class C"));
+            // Decorators should be removed (no errors)
+            assert_eq!(res.errors.len(), 0);
+            // The decorator syntax should be removed from output
+            assert!(!res.code.contains("@dec"));
+        }
+    }
+    
+    #[test]
+    fn test_decorator_removal() {
+        let code = r#"
+            @classDecorator
+            class MyClass {
+                @methodDecorator
+                method() {}
+                
+                @fieldDecorator
+                field = 1;
+            }
+        "#;
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // All decorators should be stripped
+            assert!(!res.code.contains("@classDecorator"));
+            assert!(!res.code.contains("@methodDecorator"));
+            assert!(!res.code.contains("@fieldDecorator"));
+            // But the class structure should remain
+            assert!(res.code.contains("class MyClass"));
+            assert!(res.code.contains("method()"));
+            assert!(res.code.contains("field = 1"));
+            assert_eq!(res.errors.len(), 0);
         }
     }
 
