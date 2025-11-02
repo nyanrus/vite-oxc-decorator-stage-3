@@ -269,6 +269,81 @@ mod tests {
     }
 
     #[test]
+    fn test_helper_injection_on_decorator_presence() {
+        let code = r#"
+            function logged(value, { kind, name }) {
+                if (kind === "method") {
+                    return function (...args) {
+                        console.log(`calling ${name}`);
+                        return value.call(this, ...args);
+                    };
+                }
+            }
+
+            class C {
+                @logged
+                m(arg) {
+                    return arg * 2;
+                }
+            }
+        "#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Helper functions should be injected
+            assert!(res.code.contains("function _applyDecs"));
+            assert!(res.code.contains("function _toPropertyKey"));
+            assert!(res.code.contains("function _toPrimitive"));
+            assert!(res.code.contains("function _setFunctionName"));
+            assert!(res.code.contains("function _checkInRHS"));
+            
+            // Original code should still be present (without @decorator syntax)
+            assert!(res.code.contains("class C"));
+            assert!(res.code.contains("function logged"));
+            assert!(!res.code.contains("@logged")); // Decorator syntax removed
+            
+            // No errors
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_no_helper_injection_without_decorators() {
+        let code = r#"
+            class C {
+                m(arg) {
+                    return arg * 2;
+                }
+            }
+        "#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Helper functions should NOT be injected when no decorators
+            assert!(!res.code.contains("function _applyDecs"));
+            assert!(!res.code.contains("function _toPropertyKey"));
+            
+            // Original code should be present
+            assert!(res.code.contains("class C"));
+            
+            // No errors
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
     fn test_method_decorator_detected() {
         let code = "class C { @dec method() {} }";
         let result = transform(
