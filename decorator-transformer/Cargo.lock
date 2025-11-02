@@ -88,6 +88,7 @@ dependencies = [
  "oxc_ast",
  "oxc_codegen",
  "oxc_parser",
+ "oxc_semantic",
  "oxc_span",
  "oxc_traverse",
  "serde",

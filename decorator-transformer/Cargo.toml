@@ -16,6 +16,7 @@ oxc_codegen = "0.96.0"
 oxc_parser = "0.96.0"
 oxc_span = "0.96.0"
 oxc_traverse = "0.96.0"
+oxc_semantic = "0.96.0"
 
 [profile.release]
 opt-level = "s"  # Optimize for size

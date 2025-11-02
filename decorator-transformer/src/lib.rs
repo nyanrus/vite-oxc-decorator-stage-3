@@ -3,6 +3,8 @@ use oxc_allocator::Allocator;
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
+use oxc_traverse::traverse_mut;
+use oxc_semantic::SemanticBuilder;
 
 mod transformer;
 use transformer::{DecoratorTransformer, TransformerState};
@@ -74,9 +76,14 @@ pub fn transform(
     }
 
     // Apply decorator transformation
+    // Build semantic information (scoping) required by traverse_mut
+    let semantic_ret = SemanticBuilder::new()
+        .build(&parse_result.program);
+    let scoping = semantic_ret.semantic.into_scoping();
+    
     let mut transformer = DecoratorTransformer::new(&allocator);
-    let mut state = TransformerState;
-    transformer.traverse_program(&mut parse_result.program, &mut state);
+    let state = TransformerState;
+    traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, state);
     
     // Generate code from transformed AST
     let codegen_result = Codegen::new().build(&parse_result.program);
