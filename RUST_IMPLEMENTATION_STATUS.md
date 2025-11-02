@@ -9,6 +9,7 @@
 **File Structure:**
 - `src/lib.rs` - Main entry point with transform function
 - `src/transformer.rs` - Decorator transformer using oxc Traverse trait
+- `src/codegen.rs` - Code generation utilities and helper functions
 - `wit/world.wit` - WebAssembly Component Model interface definition
 - `Cargo.toml` - Dependencies configuration
 
@@ -16,8 +17,9 @@
 1. **AST Parsing**: Uses oxc_parser to parse JavaScript/TypeScript with decorators
 2. **AST Traversal**: Implements oxc_traverse::Traverse trait to visit decorator nodes
 3. **Decorator Detection**: Identifies all decorator types (class, method, field, accessor)
-4. **Decorator Removal**: Strips decorators from AST to produce valid JavaScript
-5. **Error Handling**: Collects and reports transformation errors
+4. **Helper Function Injection**: Injects TC39 Stage 3 runtime helpers when decorators are present
+5. **Decorator Removal**: Strips decorators from AST to produce valid JavaScript
+6. **Error Handling**: Collects and reports transformation errors
 
 **Decorator Types Handled:**
 - ✅ Class decorators
@@ -27,26 +29,40 @@
 - ✅ Getter/setter decorators
 - ✅ Static and private member decorators
 
+### ✅ Helper Functions Infrastructure (Complete)
+
+The transformer now includes:
+- **_applyDecs**: Complete implementation of the TC39 Stage 3 decorator application helper
+- **_toPropertyKey**: Converts values to property keys
+- **_toPrimitive**: Implements ToPrimitive abstract operation
+- **_setFunctionName**: Sets function names dynamically
+- **_checkInRHS**: Validates right-hand side of 'in' operator
+- **DecoratorDescriptor**: Type system for decorator metadata
+- **DecoratorKind**: Enum for decorator types (field, accessor, method, getter, setter, class)
+- **Helper injection logic**: Automatically injects helpers when decorators are detected
+
 ### ✅ Basic Transformation (Complete)
 
 The transformer now successfully:
 - Parses code with decorators
+- Detects decorator presence efficiently
+- Injects TC39 Stage 3 runtime helper functions when needed
 - Removes all decorator syntax from the AST
 - Generates valid JavaScript output without decorators
 - Preserves all class and member structures
 - Handles all decorator placements correctly
-- All tests passing (9/9 Rust tests, 23/23 integration tests)
+- All tests passing (13/13 Rust tests, 23/23 integration tests)
 
 **Limitations:**
-- Decorators are stripped, not applied (no runtime behavior)
-- No decorator functionality in output code
+- Decorators are stripped after helper injection (no AST-level transformation yet)
+- No decorator functionality in output code (helpers are present but not called)
 - For working decorators, use Babel transformation
 
-### ⚠️ Full Transformation Logic (Not Complete)
+### ⚠️ Full AST-Level Transformation Logic (Not Complete)
 
 **What's Missing:**
 
-The transformer currently **detects** decorators but does not **generate** the transformed AST. Full implementation requires:
+The transformer currently **detects** decorators and **injects helpers** but does not **generate the transformed AST nodes**. Full implementation requires:
 
 1. **AST Node Generation**: Creating new AST nodes for:
    - IIFE wrapping class declarations
@@ -93,29 +109,34 @@ The transformer currently **detects** decorators but does not **generate** the t
 
 ## Why This Is Complex
 
-### Chal Difficulty
+### Technical Challenges
 
 1. **oxc AST Builder Complexity**:
    - oxc's AstBuilder requires careful lifetime management
    - Each AST node type has specific construction requirements
    - Complex nesting of expressions, statements, and declarations
+   - Need to generate static blocks, IIFEs, and complex expressions
 
 2. **TC39 Specification**:
    - ~100 pages of transformation rules
    - Different semantics for each decorator type
    - Subtle timing and ordering requirements
+   - Context object creation with proper access semantics
 
 3. **Runtime Helpers**:
-   - Need to inject helper functions into every transformed module
-   - Helpers must handle edge cases (private fields, symbols, etc.)
-   - Must match Babel's proven implementation exactly
+   - ✅ Helper functions now injected into transformed modules
+   - ✅ Helpers handle edge cases (private fields, symbols, etc.)
+   - ✅ Implementation matches Babel's proven approach
+   - ⚠️ Still need AST-level transformation to call these helpers
 
 ### Estimated Effort
 
-- **Detected decorators**: ✅ Complete (current state)
-- **Generate simple transformations**: ~40 hours
-- **Handle all edge cases**: ~80 hours
-- **Match Babel parity**: ~120+ hours
+- **Detected decorators**: ✅ Complete
+- **Helper function infrastructure**: ✅ Complete
+- **Decorator metadata collection**: ✅ Complete
+- **Generate AST nodes for transformations**: ~30-40 hours
+- **Handle all edge cases**: ~60-80 hours
+- **Match Babel parity**: ~100+ hours
 
 ## Current Approach
 
@@ -129,9 +150,11 @@ The plugin currently uses **Babel** for transformation:
 ### Rust Implementation
 
 Provides:
-- **Foundation**: Parsing, traversal, detection working
+- **Foundation**: Parsing, traversal, detection working ✅
+- **Helper Functions**: Complete TC39 Stage 3 runtime helpers ✅
+- **Infrastructure**: Decorator metadata collection and helper injection ✅
 - **Documentation**: Complete TC39 Stage 3 semantics documented in code
-- **Architecture**: Proper structure for future completion
+- **Architecture**: Proper structure for future AST-level transformation
 - **Learning Resource**: Shows how oxc transformers work
 
 ## Testing
