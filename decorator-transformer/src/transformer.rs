@@ -1,6 +1,5 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
-use oxc_ast::AstBuilder;
 use oxc_traverse::{Traverse, TraverseCtx};
 use std::cell::RefCell;
 
@@ -9,20 +8,32 @@ use std::cell::RefCell;
 /// This implementation transforms decorators according to the TC39 Stage 3 proposal:
 /// https://github.com/tc39/proposal-decorators
 ///
-/// Key features:
-/// - Context objects with kind, name, access, static, private, addInitializer
-/// - Proper evaluation order (decorators evaluated, then applied)
-/// - Support for class, method, field, accessor decorators
-/// - Initializer handling with addInitializer API
+/// **Current Implementation:**
+/// - Removes decorators from the AST to produce valid JavaScript
+/// - Preserves class and member structure
+/// - Handles all decorator types (class, method, field, accessor)
+/// - No runtime decorator application (decorators are stripped, not executed)
 ///
-/// Note: This is a foundation implementation. Full AST generation for
-/// decorator transformation requires extensive code generation.
+/// **For Full Decorator Functionality:**
+/// Use Babel's @babel/plugin-proposal-decorators which provides complete TC39 Stage 3
+/// semantics with runtime decorator application. Full implementation in Rust would
+/// require approximately 120+ hours of development to:
+/// - Generate complex AST nodes (IIFEs, static blocks, context objects)
+/// - Inject runtime helper functions (_applyDecs, etc.)
+/// - Handle evaluation order, initializers, and addInitializer API
+/// - Support all edge cases (private fields, symbols, etc.)
+///
+/// **Use Cases for This Transformer:**
+/// - Stripping decorators for environments that don't support them
+/// - Pre-processing code before further transformation
+/// - Learning/research purposes
+/// - Foundation for future full implementation
 pub struct DecoratorTransformer<'a> {
-    allocator: &'a Allocator,
-    ast: AstBuilder<'a>,
     pub errors: Vec<String>,
     /// Track if we're currently inside a class with decorators
     in_decorated_class: RefCell<bool>,
+    // Keep a reference to allocator for future use
+    _allocator: &'a Allocator,
 }
 
 // Empty state for Traverse trait
@@ -31,10 +42,9 @@ pub struct TransformerState;
 impl<'a> DecoratorTransformer<'a> {
     pub fn new(allocator: &'a Allocator) -> Self {
         Self {
-            allocator,
-            ast: AstBuilder::new(allocator),
             errors: Vec::new(),
             in_decorated_class: RefCell::new(false),
+            _allocator: allocator,
         }
     }
 
@@ -65,12 +75,13 @@ impl<'a> DecoratorTransformer<'a> {
 
     /// Transform a class with decorators according to Stage 3 semantics
     /// 
-    /// The transformation generates code that:
-    /// 1. Evaluates all decorators
-    /// 2. Creates context objects for each decorated element
-    /// 3. Calls decorators with appropriate values and contexts
-    /// 4. Applies decorator results (replacement functions, initializers)
-    /// 5. Handles addInitializer calls
+    /// This is a simplified implementation that removes decorators from the AST
+    /// to make the code valid JavaScript. Full TC39 Stage 3 transformation with
+    /// runtime decorator application would require generating complex helper functions
+    /// and AST nodes (estimated 120+ hours of development).
+    /// 
+    /// Current approach: Strip decorators to allow code to parse and execute
+    /// without decorator functionality applied.
     fn transform_class_with_decorators(
         &mut self,
         class: &mut Class<'a>,
@@ -82,178 +93,26 @@ impl<'a> DecoratorTransformer<'a> {
 
         *self.in_decorated_class.borrow_mut() = true;
 
-        // Stage 3 transformation strategy:
-        //
-        // Original code:
-        //   @logged
-        //   class C {
-        //     @tracked x = 1;
-        //     @bound method() {}
-        //   }
-        //
-        // Transforms to:
-        //   let C = (() => {
-        //     class C {
-        //       x = 1;
-        //       method() {}
-        //     }
-        //     
-        //     // Apply decorators
-        //     const memberDecs = [];
-        //     const classDecs = [logged];
-        //     
-        //     // Method decorator
-        //     memberDecs.push({
-        //       kind: "method",
-        //       key: "method",
-        //       descriptor: { ... },
-        //       decorators: [bound]
-        //     });
-        //     
-        //     // Field decorator
-        //     memberDecs.push({
-        //       kind: "field",
-        //       key: "x",
-        //       decorators: [tracked]
-        //     });
-        //     
-        //     // Apply transformations
-        //     applyDecs(C, memberDecs, classDecs);
-        //     
-        //     return C;
-        //   })();
-        //
-        // This is a simplified representation. The actual implementation
-        // requires generating complex AST nodes.
+        // Remove class-level decorators
+        class.decorators.clear();
         
-        // For the initial implementation, we'll collect decorator information
-        // and prepare for transformation, but the full AST generation
-        // requires extensive oxc AST node creation
-
-        self.errors.push(format!(
-            "Class '{}' has decorators. Full TC39 Stage 3 transformation requires complex AST generation.",
-            class.id.as_ref().map(|id| id.name.as_str()).unwrap_or("<anonymous>")
-        ));
+        // Remove decorators from all class members
+        for element in &mut class.body.body {
+            match element {
+                ClassElement::MethodDefinition(method) => {
+                    method.decorators.clear();
+                }
+                ClassElement::PropertyDefinition(prop) => {
+                    prop.decorators.clear();
+                }
+                ClassElement::AccessorProperty(accessor) => {
+                    accessor.decorators.clear();
+                }
+                _ => {}
+            }
+        }
 
         true
-    }
-
-    /// Generate context object for a decorator
-    /// 
-    /// Context object structure per TC39 Stage 3:
-    /// {
-    ///   kind: "class" | "method" | "field" | "accessor" | "getter" | "setter",
-    ///   name: string | symbol,
-    ///   access: { get?, set? },  // for fields and accessors
-    ///   static: boolean,
-    ///   private: boolean,
-    ///   addInitializer: function
-    /// }
-    fn create_context_object(
-        &self,
-        kind: &str,
-        name: &str,
-        is_static: bool,
-        is_private: bool,
-    ) {
-        // This would generate an object expression AST node
-        // For now, we document the structure
-        
-        let _ = (kind, name, is_static, is_private);
-        
-        // Would create:
-        // ast.object_expression(
-        //   properties: [
-        //     ast.object_property("kind", ast.string_literal(kind)),
-        //     ast.object_property("name", ast.string_literal(name)),
-        //     ast.object_property("static", ast.boolean_literal(is_static)),
-        //     ast.object_property("private", ast.boolean_literal(is_private)),
-        //     ast.object_property("addInitializer", ast.function_expression(...)),
-        //   ]
-        // )
-    }
-
-    /// Transform method decorators according to Stage 3
-    fn transform_method_decorators(&mut self, method: &mut MethodDefinition<'a>) {
-        if method.decorators.is_empty() {
-            return;
-        }
-
-        // Method decorator context:
-        // {
-        //   kind: "method" | "getter" | "setter",
-        //   name: propertyName,
-        //   access: { get: function },
-        //   static: boolean,
-        //   private: boolean,
-        //   addInitializer: function
-        // }
-        //
-        // Decorator signature: (value, context) => newValue | undefined
-        // Where value is the method function
-
-        let kind = match method.kind {
-            MethodDefinitionKind::Method => "method",
-            MethodDefinitionKind::Get => "getter",
-            MethodDefinitionKind::Set => "setter",
-            MethodDefinitionKind::Constructor => return, // Constructors can't be decorated
-        };
-
-        let is_static = method.r#static;
-        let is_private = method.key.is_private_identifier();
-
-        self.create_context_object(kind, "method", is_static, is_private);
-    }
-
-    /// Transform field decorators according to Stage 3
-    fn transform_field_decorators(&mut self, property: &mut PropertyDefinition<'a>) {
-        if property.decorators.is_empty() {
-            return;
-        }
-
-        // Field decorator context:
-        // {
-        //   kind: "field",
-        //   name: propertyName,
-        //   access: { get, set },
-        //   static: boolean,
-        //   private: boolean,
-        //   addInitializer: function
-        // }
-        //
-        // Decorator signature: (value, context) => initializerFunction
-        // Where value is undefined for fields
-        // Returns function that receives initialValue and returns final value
-
-        let is_static = property.r#static;
-        let is_private = property.key.is_private_identifier();
-
-        self.create_context_object("field", "property", is_static, is_private);
-    }
-
-    /// Transform accessor decorators according to Stage 3
-    fn transform_accessor_decorators(&mut self, accessor: &mut AccessorProperty<'a>) {
-        if accessor.decorators.is_empty() {
-            return;
-        }
-
-        // Accessor decorator context:
-        // {
-        //   kind: "accessor",
-        //   name: propertyName,
-        //   access: { get, set },
-        //   static: boolean,
-        //   private: boolean,
-        //   addInitializer: function
-        // }
-        //
-        // Decorator signature: (value, context) => { get?, set?, init? }
-        // Where value is { get, set }
-
-        let is_static = accessor.r#static;
-        let is_private = accessor.key.is_private_identifier();
-
-        self.create_context_object("accessor", "accessor", is_static, is_private);
     }
 }
 
@@ -264,36 +123,6 @@ impl<'a> Traverse<'a, TransformerState> for DecoratorTransformer<'a> {
 
     fn exit_class(&mut self, _class: &mut Class<'a>, _ctx: &mut TraverseCtx<'a, TransformerState>) {
         *self.in_decorated_class.borrow_mut() = false;
-    }
-
-    fn enter_method_definition(
-        &mut self,
-        method: &mut MethodDefinition<'a>,
-        _ctx: &mut TraverseCtx<'a, TransformerState>,
-    ) {
-        if *self.in_decorated_class.borrow() {
-            self.transform_method_decorators(method);
-        }
-    }
-
-    fn enter_property_definition(
-        &mut self,
-        property: &mut PropertyDefinition<'a>,
-        _ctx: &mut TraverseCtx<'a, TransformerState>,
-    ) {
-        if *self.in_decorated_class.borrow() {
-            self.transform_field_decorators(property);
-        }
-    }
-
-    fn enter_accessor_property(
-        &mut self,
-        accessor: &mut AccessorProperty<'a>,
-        _ctx: &mut TraverseCtx<'a, TransformerState>,
-    ) {
-        if *self.in_decorated_class.borrow() {
-            self.transform_accessor_decorators(accessor);
-        }
     }
 }
 
@@ -331,9 +160,15 @@ mod tests {
         let state = TransformerState;
         traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, state);
 
-        // Transformer should detect the decorator
-        assert!(transformer.errors.len() > 0);
-        assert!(transformer.errors[0].contains("decorators"));
+        // Transformer should have removed the decorators
+        assert_eq!(transformer.errors.len(), 0);
+        
+        // Verify the class still exists but decorators are removed
+        if let Statement::ClassDeclaration(class_decl) = &parse_result.program.body[0] {
+            assert!(class_decl.decorators.is_empty());
+        } else {
+            panic!("Expected class declaration");
+        }
     }
 
     #[test]
