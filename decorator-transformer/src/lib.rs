@@ -7,7 +7,9 @@ use oxc_traverse::traverse_mut;
 use oxc_semantic::SemanticBuilder;
 
 mod transformer;
+mod codegen;
 use transformer::{DecoratorTransformer, TransformerState};
+use codegen::generate_helper_functions;
 
 // Note: WIT bindgen configuration requires cargo-component build tool
 // The actual WASM Component generation happens during build with:
@@ -35,8 +37,9 @@ fn default_true() -> bool {
 
 /// Transform JavaScript/TypeScript code with decorators
 /// 
-/// This function implements the core transformation logic.
-/// It is called by the WASM Component Model export when built with cargo-component.
+/// This function implements the core transformation logic for TC39 Stage 3 decorators.
+/// It parses the code, detects decorators, injects helper functions, and generates
+/// the proper transformation.
 pub fn transform(
     filename: String,
     source_text: String,
@@ -75,18 +78,41 @@ pub fn transform(
         });
     }
 
+    // Check if code has decorators before transforming
+    let mut transformer = DecoratorTransformer::new(&allocator);
+    let has_decorators = transformer.check_for_decorators(&parse_result.program);
+    
+    if !has_decorators {
+        // No decorators, return original code
+        let codegen_result = Codegen::new().build(&parse_result.program);
+        return Ok(TransformResult {
+            code: codegen_result.code,
+            map: if opts.source_maps {
+                codegen_result.map.map(|m| m.to_json_string())
+            } else {
+                None
+            },
+            errors: vec![],
+        });
+    }
+
     // Apply decorator transformation
     // Build semantic information (scoping) required by traverse_mut
     let semantic_ret = SemanticBuilder::new()
         .build(&parse_result.program);
     let scoping = semantic_ret.semantic.into_scoping();
     
-    let mut transformer = DecoratorTransformer::new(&allocator);
     let state = TransformerState;
     traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, state);
     
     // Generate code from transformed AST
-    let codegen_result = Codegen::new().build(&parse_result.program);
+    let mut codegen_result = Codegen::new().build(&parse_result.program);
+    
+    // Inject helper functions at the beginning of the code
+    if transformer.needs_helpers() {
+        let helpers = generate_helper_functions();
+        codegen_result.code = format!("{}\n{}", helpers, codegen_result.code);
+    }
     
     Ok(TransformResult {
         code: codegen_result.code,
