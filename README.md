@@ -1,0 +1,1 @@
+# vite-oxc-decorator-stage-3
