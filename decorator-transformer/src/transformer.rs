@@ -167,7 +167,7 @@ impl<'a> DecoratorTransformer<'a> {
     fn get_property_key_name(&self, key: &PropertyKey) -> String {
         match key {
             PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-            PropertyKey::PrivateIdentifier(id) => id.name.to_string(),
+            PropertyKey::PrivateIdentifier(id) => format!("#{}", id.name), // Include # prefix for private
             PropertyKey::StringLiteral(lit) => lit.value.to_string(),
             PropertyKey::NumericLiteral(lit) => lit.value.to_string(),
             _ => "computed".to_string(),
@@ -194,12 +194,16 @@ impl<'a> DecoratorTransformer<'a> {
         *self.in_decorated_class.borrow_mut() = true;
         *self.helpers_injected.borrow_mut() = true; // Mark that we need helper functions
         
-        // Collect metadata about decorators
+        // Collect metadata about decorators for future use
+        // TODO: Use this metadata to generate proper AST transformation
+        // when implementing the full TC39 Stage 3 transformation logic.
+        // This will be used to generate static initialization blocks,
+        // _applyDecs calls, and proper decorator evaluation order.
         let _metadata = self.collect_decorator_metadata(class);
 
-        // For now, we'll still strip decorators to maintain backward compatibility
+        // For now, we strip decorators while injecting helper functions.
         // Full TC39 Stage 3 transformation with proper _applyDecs call generation
-        // requires complex AST manipulation which is approximately 120+ hours of work
+        // requires complex AST manipulation which is approximately 30-40 hours of work
         // to match Babel's implementation exactly.
         //
         // The helper functions are injected at the program level,

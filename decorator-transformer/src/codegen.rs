@@ -72,27 +72,31 @@ impl DecoratorDescriptor {
     /// Format: [decorator, flags, key, isPrivate]
     /// where flags = kind | (static ? 8 : 0) | (computed ? 16 : 0)
     pub fn to_descriptor_code(&self) -> String {
-        let mut result = String::new();
+        let mut descriptors = Vec::new();
         
         for decorator_name in &self.decorator_names {
             let flags = self.kind as u8 | if self.is_static { 8 } else { 0 };
             let key_code = if self.is_private {
-                format!("\"{}\"", &self.key[1..]) // Remove # from private names
+                // Remove # prefix from private names for the descriptor
+                if self.key.starts_with('#') {
+                    format!("\"{}\"", &self.key[1..])
+                } else {
+                    format!("\"{}\"", self.key)
+                }
             } else {
                 format!("\"{}\"", self.key)
             };
             
-            write!(
-                &mut result,
+            descriptors.push(format!(
                 "[{}, {}, {}, {}]",
                 decorator_name,
                 flags,
                 key_code,
                 if self.is_private { "true" } else { "false" }
-            ).unwrap();
+            ));
         }
         
-        result
+        descriptors.join(", ")
     }
 }
 
