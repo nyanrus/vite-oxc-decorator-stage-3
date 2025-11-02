@@ -20,7 +20,7 @@ Based on feedback to implement the transformer in Rust using oxc:
 
 1. **Rust Transformer** (`decorator-transformer/`):
    - Built with oxc v0.96.0 (parser, AST, codegen)
-   - Compiled to WASM with wasm-bindgen
+   - Compiled to WASM with wit-bindgen
    - Foundation complete, full transformation logic in progress
 
 2. **TypeScript Bridge** (`src/index.ts`):
@@ -50,7 +50,7 @@ decorator-transformer/
 
 2. **Generate JS Bindings**:
    ```bash
-   wasm-bindgen target/wasm32-unknown-unknown/release/decorator_transformer.wasm \
+   wit-bindgen target/wasm32-unknown-unknown/release/decorator_transformer.wasm \
      --out-dir ../pkg --target web
    ```
 
@@ -65,7 +65,7 @@ The Rust transformer currently:
 - ✅ Parses JavaScript/TypeScript using oxc_parser
 - ✅ Builds AST with oxc_ast
 - ✅ Generates code with oxc_codegen
-- ✅ Exposes WASM bindings via wasm-bindgen
+- ✅ Exposes WASM bindings via wit-bindgen
 - ⚠️  Passes through code (doesn't transform decorators yet)
 
 ### Next Steps for Rust Implementation
@@ -152,7 +152,7 @@ Test suite (23 tests) covers all decorator types and runs against Babel transfor
 ## Build Tools
 
 - **Rust**: 1.90.0
-- **wasm-bindgen**: 0.2.105
+- **wit-bindgen**: 0.2.105
 - **oxc**: 0.96.0
 - **TypeScript**: 5.3.3
 - **Vite**: 5.0.0

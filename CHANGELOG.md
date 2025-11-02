@@ -8,22 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Rust/WASM Transformer**: Built with oxc v0.96.0
+- **Rust/WASM Component Model Transformer**: Built with oxc v0.96.0
   - oxc_parser for JavaScript/TypeScript parsing
   - oxc_ast for AST manipulation
   - oxc_codegen for code generation
-  - wasm-bindgen for JavaScript interop
-- **Hybrid Architecture**: WASM transformer with Babel fallback
+  - wit-bindgen for WebAssembly Component Model bindings
+  - jco (JavaScript Component Tools) for JavaScript bindings
+- **WIT Interface Definition**: Defined transformer interface using WebAssembly Interface Types
+- **Hybrid Architecture**: WASM Component transformer with Babel fallback
 - `useWasm` option to enable experimental Rust transformer
-- Build scripts for WASM compilation (`build:wasm`, `build:bindgen`)
-- decorator-transformer Rust crate
-- Comprehensive documentation for Rust implementation
+- Build scripts for WASM Component compilation (`build:wasm`, `build:jco`)
+- decorator-transformer Rust crate with Component Model support
+- Comprehensive documentation for Rust/WASM Component implementation
 
 ### Changed
-- Plugin now supports both WASM and Babel transformation backends
-- Updated TypeScript bridge to handle dual transformer modes
-- Enhanced README with WASM architecture explanation
-- Updated IMPLEMENTATION.md with Rust/WASM details
+- **Migrated from wasm-bindgen to wit-bindgen**: Now uses WebAssembly Component Model
+- **Build system**: Uses cargo-component and jco instead of wasm-pack
+- **Target**: Changed from wasm32-unknown-unknown to wasm32-wasip1
+- Plugin now supports both WASM Component and Babel transformation backends
+- Updated TypeScript bridge to handle Component Model Result types
+- Enhanced README with Component Model architecture explanation
+- Updated all documentation with wit-bindgen/jco references
 
 ## [0.1.0] - 2024-11-02
 

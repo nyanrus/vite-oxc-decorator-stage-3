@@ -17,7 +17,7 @@ A Vite plugin that transforms TC39 Stage 3 decorators using Rust/oxc with WebAss
 
 This plugin uses a **hybrid approach**:
 
-1. **Primary**: Rust transformer built with [oxc](https://oxc-project.github.io/) v0.96.0, compiled to WebAssembly via wasm-pack
+1. **Primary**: Rust transformer built with [oxc](https://oxc-project.github.io/) v0.96.0, compiled to WebAssembly via WebAssembly Component Model
 2. **Fallback**: Babel's `@babel/plugin-proposal-decorators` for proven compatibility
 
 The Rust/WASM transformer provides:
@@ -292,7 +292,7 @@ Built with [oxc](https://oxc-project.github.io/) v0.96.0 and compiled to WebAsse
 - **Parser**: oxc_parser for JavaScript/TypeScript parsing
 - **AST**: oxc_ast for AST manipulation
 - **Codegen**: oxc_codegen for code generation
-- **WASM Bindings**: wasm-bindgen for JavaScript interop
+- **WASM Bindings**: wit-bindgen and jco for JavaScript interop
 
 **Current Status**: The Rust transformer foundation is complete (parsing, AST, codegen), but the full Stage 3 decorator transformation logic is still being implemented. Enable with `useWasm: true` option.
 
@@ -346,7 +346,7 @@ The Rust/WASM transformer can be built from source:
 ```bash
 # Prerequisites
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli
+cargo install wit-bindgen and jco-cli
 
 # Build WASM module
 npm run build:wasm

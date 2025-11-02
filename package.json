@@ -18,10 +18,10 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build:wasm": "cd decorator-transformer && cargo build --target wasm32-unknown-unknown --release",
-    "build:bindgen": "wasm-bindgen decorator-transformer/target/wasm32-unknown-unknown/release/decorator_transformer.wasm --out-dir pkg --target web",
+    "build:wasm": "cd decorator-transformer && cargo component build --release",
+    "build:jco": "jco transpile decorator-transformer/target/wasm32-wasi/release/decorator_transformer.wasm -o pkg",
     "build:ts": "tsc",
-    "build": "npm run build:wasm && npm run build:bindgen && npm run build:ts",
+    "build": "npm run build:wasm && npm run build:jco && npm run build:ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build"
@@ -34,6 +34,8 @@
     "tc39",
     "oxc",
     "wasm",
+    "component-model",
+    "wit",
     "rust",
     "transform",
     "javascript",
@@ -65,7 +67,8 @@
     "@types/node": "^20.11.0",
     "typescript": "^5.3.3",
     "vite": "^5.0.0",
-    "vitest": "^1.2.0"
+    "vitest": "^1.2.0",
+    "@bytecodealliance/jco": "^1.0.0"
   },
   "engines": {
     "node": ">=16.0.0"

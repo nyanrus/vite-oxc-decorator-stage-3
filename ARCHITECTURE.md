@@ -86,7 +86,7 @@
 ### 2. Rust/WASM Transformer (`decorator-transformer/`)
 
 **Components**:
-- `Cargo.toml` - Dependencies (oxc v0.96.0, wasm-bindgen)
+- `Cargo.toml` - Dependencies (oxc v0.96.0, wit-bindgen)
 - `src/lib.rs` - Transformer implementation
 
 **Capabilities**:
@@ -160,7 +160,7 @@ interface ViteOxcDecoratorOptions {
    cargo build --target wasm32-unknown-unknown --release
    
 2. WASM Binding Generation
-   wasm-bindgen ... --out-dir pkg --target web
+   wit-bindgen ... --out-dir pkg --target web
    
 3. TypeScript Compilation
    tsc

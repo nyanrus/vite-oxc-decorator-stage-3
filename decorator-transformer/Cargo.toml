@@ -4,12 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-wasm-bindgen = "0.2"
+wit-bindgen = "0.16"
 serde = { version = "1.0", features = ["derive"] }
-serde-wasm-bindgen = "0.6"
 serde_json = "1.0"
 oxc_allocator = "0.96.0"
 oxc_ast = "0.96.0"
@@ -17,13 +16,6 @@ oxc_codegen = "0.96.0"
 oxc_parser = "0.96.0"
 oxc_span = "0.96.0"
 oxc_traverse = "0.96.0"
-console_error_panic_hook = { version = "0.1", optional = true }
-
-[dev-dependencies]
-wasm-bindgen-test = "0.3"
-
-[features]
-default = ["console_error_panic_hook"]
 
 [profile.release]
 opt-level = "s"  # Optimize for size

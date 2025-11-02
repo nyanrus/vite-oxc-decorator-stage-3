@@ -29,19 +29,21 @@ export interface ViteOxcDecoratorOptions {
   babel?: TransformOptions;
 }
 
-// Type for WASM module
+// Type for WASM Component Model transformer (jco-generated)
+interface TransformResult {
+  code: string;
+  map?: string;
+  errors: string[];
+}
+
 interface WasmTransformer {
-  transform(filename: string, code: string, options: any): Promise<{
-    code: string;
-    map?: string;
-    errors: string[];
-  }>;
+  transform(filename: string, sourceText: string, options: string): TransformResult | { tag: 'err', val: string };
 }
 
 let wasmTransformer: WasmTransformer | null = null;
 
 /**
- * Load the WASM transformer module
+ * Load the WASM transformer module (jco-generated)
  */
 async function loadWasmTransformer(): Promise<WasmTransformer | null> {
   if (wasmTransformer) {
@@ -49,8 +51,8 @@ async function loadWasmTransformer(): Promise<WasmTransformer | null> {
   }
 
   try {
-    // Try to load the WASM module
-    const wasm = await import('../pkg/decorator_transformer.js');
+    // Try to load the jco-generated WASM Component
+    const wasm = await import('../pkg/transformer.js');
     wasmTransformer = wasm as unknown as WasmTransformer;
     return wasmTransformer;
   } catch (e) {
@@ -64,7 +66,7 @@ async function loadWasmTransformer(): Promise<WasmTransformer | null> {
  * Vite plugin for transforming Stage 3 decorators
  * 
  * This plugin can use either:
- * - Rust/WASM transformer built with oxc (experimental, set useWasm: true)
+ * - Rust/WASM Component Model transformer built with oxc (experimental, set useWasm: true)
  * - Babel's decorator plugin (default, proven implementation)
  * 
  * Both follow the TC39 Stage 3 proposal semantics.
@@ -132,16 +134,25 @@ export default function viteOxcDecoratorStage3(
         const wasm = await wasmInit;
         if (wasm) {
           try {
-            const result = await wasm.transform(id, code, { source_maps: true });
+            // Call Component Model transform function
+            const options = JSON.stringify({ source_maps: true });
+            const result = wasm.transform(id, code, options);
             
-            if (result.errors.length > 0) {
-              console.error(`WASM transformer errors in ${id}:`, result.errors);
+            // Check if result is an error (Component Model Result type)
+            if (typeof result === 'object' && 'tag' in result && result.tag === 'err') {
+              console.error(`WASM transformer error in ${id}:`, result.val);
               // Fall through to Babel
             } else {
-              return {
-                code: result.code,
-                map: result.map ? JSON.parse(result.map) : null,
-              };
+              const transformResult = result as TransformResult;
+              if (transformResult.errors.length > 0) {
+                console.error(`WASM transformer errors in ${id}:`, transformResult.errors);
+                // Fall through to Babel
+              } else {
+                return {
+                  code: transformResult.code,
+                  map: transformResult.map ? JSON.parse(transformResult.map) : null,
+                };
+              }
             }
           } catch (error) {
             console.warn(`WASM transformer failed for ${id}, falling back to Babel:`, error);

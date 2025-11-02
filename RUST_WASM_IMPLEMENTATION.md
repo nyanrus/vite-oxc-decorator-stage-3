@@ -2,7 +2,7 @@
 
 ## Request
 
-Implement the transformer in Rust using oxc, bind to JS with wasm-pack, and write bridge for vite plugin with TypeScript.
+Implement the transformer in Rust using oxc, bind to JS with cargo-component and jco, and write bridge for vite plugin with TypeScript.
 
 ## Implementation
 
@@ -17,11 +17,11 @@ Created a new Rust crate that uses oxc v0.96.0:
 - `oxc_codegen` - Code generation
 - `oxc_span` - Source locations
 - `oxc_traverse` - AST traversal
-- `wasm-bindgen` - JavaScript bindings
+- `wit-bindgen` - JavaScript bindings
 - `serde` - Serialization
 
 **Implementation** (`src/lib.rs`):
-- `transform()` function exposed to JavaScript via wasm-bindgen
+- `transform()` function exposed to JavaScript via wit-bindgen
 - Parses code using oxc_parser
 - Generates code using oxc_codegen
 - Returns `TransformResult` with code, sourcemap, and errors
@@ -33,7 +33,7 @@ Created a new Rust crate that uses oxc v0.96.0:
 cargo build --target wasm32-unknown-unknown --release
 
 # Generate JavaScript bindings
-wasm-bindgen target/wasm32-unknown-unknown/release/decorator_transformer.wasm \
+wit-bindgen target/wasm32-unknown-unknown/release/decorator_transformer.wasm \
   --out-dir pkg --target web
 ```
 
