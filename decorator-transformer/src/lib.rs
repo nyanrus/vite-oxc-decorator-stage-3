@@ -112,10 +112,18 @@ pub fn transform(
     let transformations = transformer.transformations.borrow();
     for transformation in transformations.iter() {
         // Find the class in the generated code and inject the static block
-        // Look for "class ClassName {" and inject static block after the opening brace
+        // Try to match "class ClassName {" first
         let class_pattern = format!("class {} {{", transformation.class_name);
-        if let Some(pos) = codegen_result.code.find(&class_pattern) {
-            let injection_point = pos + class_pattern.len();
+        let position = if let Some(pos) = codegen_result.code.find(&class_pattern) {
+            Some(pos + class_pattern.len())
+        } else if transformation.class_name == "AnonymousClass" {
+            // For anonymous classes, try to match just "class {"
+            codegen_result.code.find("class {").map(|pos| pos + "class {".len())
+        } else {
+            None
+        };
+        
+        if let Some(injection_point) = position {
             let before = &codegen_result.code[..injection_point];
             let after = &codegen_result.code[injection_point..];
             codegen_result.code = format!("{}\n  {}{}", before, transformation.static_block_code, after);

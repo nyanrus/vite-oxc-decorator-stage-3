@@ -271,13 +271,13 @@ impl<'a> DecoratorTransformer<'a> {
     /// Collect class-level decorators as expressions
     fn collect_class_decorators(&self, class: &Class<'a>) -> Vec<String> {
         class.decorators.iter().map(|dec| {
-            // Extract decorator name from expression
+            // Extract decorator name - for call expressions, get the callee
             match &dec.expression {
                 Expression::Identifier(ident) => ident.name.to_string(),
                 Expression::CallExpression(call) => {
-                    // For decorator calls like @logged(), extract the callee name
+                    // For call expressions like @dec(), we want just the function name
                     match &call.callee {
-                        Expression::Identifier(ident) => format!("{}()", ident.name),
+                        Expression::Identifier(ident) => ident.name.to_string(),
                         _ => "decorator".to_string(),
                     }
                 }
