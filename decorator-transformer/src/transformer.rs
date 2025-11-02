@@ -3,6 +3,18 @@ use oxc_ast::ast::*;
 use oxc_traverse::{Traverse, TraverseCtx};
 use std::cell::RefCell;
 
+/// Represents the kind of decorator according to TC39 Stage 3 decorator specification
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DecoratorKind {
+    Field = 0,
+    Accessor = 1,
+    Method = 2,
+    Getter = 3,
+    Setter = 4,
+    Class = 5,
+}
+
 pub struct DecoratorTransformer<'a> {
     pub errors: Vec<String>,
     in_decorated_class: RefCell<bool>,
@@ -56,9 +68,9 @@ impl<'a> DecoratorTransformer<'a> {
             match element {
                 ClassElement::MethodDefinition(m) if !m.decorators.is_empty() => {
                     let kind = match m.kind {
-                        MethodDefinitionKind::Get => 3,
-                        MethodDefinitionKind::Set => 4,
-                        _ => 2,
+                        MethodDefinitionKind::Get => DecoratorKind::Getter,
+                        MethodDefinitionKind::Set => DecoratorKind::Setter,
+                        _ => DecoratorKind::Method,
                     };
                     Some(DecoratorMetadata {
                         decorator_names: self.extract_decorator_names(&m.decorators),
@@ -71,7 +83,7 @@ impl<'a> DecoratorTransformer<'a> {
                 ClassElement::PropertyDefinition(p) if !p.decorators.is_empty() => {
                     Some(DecoratorMetadata {
                         decorator_names: self.extract_decorator_names(&p.decorators),
-                        kind: 0,
+                        kind: DecoratorKind::Field,
                         is_static: p.r#static,
                         is_private: matches!(&p.key, PropertyKey::PrivateIdentifier(_)),
                         key: self.get_property_key_name(&p.key),
@@ -80,7 +92,7 @@ impl<'a> DecoratorTransformer<'a> {
                 ClassElement::AccessorProperty(a) if !a.decorators.is_empty() => {
                     Some(DecoratorMetadata {
                         decorator_names: self.extract_decorator_names(&a.decorators),
-                        kind: 1,
+                        kind: DecoratorKind::Accessor,
                         is_static: a.r#static,
                         is_private: matches!(&a.key, PropertyKey::PrivateIdentifier(_)),
                         key: self.get_property_key_name(&a.key),
@@ -182,7 +194,7 @@ impl<'a> DecoratorTransformer<'a> {
         let descriptors: Vec<String> = metadata.iter()
             .flat_map(|meta| {
                 meta.decorator_names.iter().map(move |decorator_name| {
-                    let flags = meta.kind | if meta.is_static { 8 } else { 0 };
+                    let flags = (meta.kind as u8) | if meta.is_static { 8 } else { 0 };
                     let key = if meta.is_private { &meta.key[1..] } else { &meta.key };
                     format!("[{}, {}, \"{}\", {}]", decorator_name, flags, key, meta.is_private)
                 })
@@ -203,7 +215,7 @@ impl<'a> DecoratorTransformer<'a> {
 #[derive(Debug, Clone)]
 struct DecoratorMetadata {
     decorator_names: Vec<String>,
-    kind: u8,
+    kind: DecoratorKind,
     is_static: bool,
     is_private: bool,
     key: String,
