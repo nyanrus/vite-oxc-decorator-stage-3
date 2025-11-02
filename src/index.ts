@@ -37,7 +37,7 @@ async function loadWasmTransformer(): Promise<WasmTransformer> {
 
   try {
     // Load the jco-generated WASM Component
-    const wasm = await import('../pkg/decorator_transformer_component.js');
+    const wasm = await import('../pkg/decorator_transformer.js');
     wasmTransformer = wasm as unknown as WasmTransformer;
     return wasmTransformer;
   } catch (e) {

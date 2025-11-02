@@ -13,5 +13,4 @@ coverage/
 .tmp/
 tmp/
 decorator-transformer/target/
-decorator-transformer/wasi_snapshot_preview1.reactor.wasm
 pkg/
