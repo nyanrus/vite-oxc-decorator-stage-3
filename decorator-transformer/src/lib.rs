@@ -166,6 +166,81 @@ mod tests {
             assert_eq!(res.errors.len(), 0);
         }
     }
+    
+    #[test]
+    fn test_complex_decorator_scenario() {
+        let code = r#"
+            function logged(value, context) {
+                console.log(`Decorating ${context.name}`);
+                return value;
+            }
+            
+            function bound(value, context) {
+                return value;
+            }
+            
+            @logged
+            class Controller {
+                @logged
+                static staticMethod() {
+                    return 'static';
+                }
+                
+                @bound
+                @logged
+                instanceMethod() {
+                    return 'instance';
+                }
+                
+                @logged
+                get value() {
+                    return this._value;
+                }
+                
+                @logged
+                set value(v) {
+                    this._value = v;
+                }
+                
+                @logged
+                accessor data = 42;
+                
+                @logged
+                #privateMethod() {
+                    return 'private';
+                }
+            }
+        "#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // All decorators should be removed
+            assert!(!res.code.contains("@logged"));
+            assert!(!res.code.contains("@bound"));
+            
+            // Class structure should be preserved
+            assert!(res.code.contains("class Controller"));
+            assert!(res.code.contains("static staticMethod()"));
+            assert!(res.code.contains("instanceMethod()"));
+            assert!(res.code.contains("get value()"));
+            assert!(res.code.contains("set value("));
+            assert!(res.code.contains("accessor data"));
+            assert!(res.code.contains("#privateMethod()"));
+            
+            // Helper functions should remain
+            assert!(res.code.contains("function logged"));
+            assert!(res.code.contains("function bound"));
+            
+            // No errors
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
 
     #[test]
     fn test_method_decorator_detected() {
