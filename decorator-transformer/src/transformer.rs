@@ -114,10 +114,6 @@ impl<'a> DecoratorTransformer<'a> {
 
         true
     }
-
-    // Note: The decorators are removed in transform_class_with_decorators
-    // These methods are no longer needed for the simplified implementation
-    // but kept for documentation purposes
 }
 
 impl<'a> Traverse<'a, TransformerState> for DecoratorTransformer<'a> {
