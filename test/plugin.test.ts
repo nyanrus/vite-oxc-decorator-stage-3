@@ -17,11 +17,6 @@ describe('Vite Plugin', () => {
     expect(typeof plugin.transform).toBe('function');
   });
 
-  it('should have buildStart function', () => {
-    const plugin = viteOxcDecoratorStage3();
-    expect(typeof plugin.buildStart).toBe('function');
-  });
-
   describe('transform', () => {
     it('should skip files without @ symbol', async () => {
       const plugin = viteOxcDecoratorStage3();
@@ -41,7 +36,7 @@ describe('Vite Plugin', () => {
 
     // Note: These tests will fail until WASM module is built
     // They are kept here for compatibility testing with Babel
-    it.skip('should transform files with decorators', async () => {
+    it('should transform files with decorators', async () => {
       const plugin = viteOxcDecoratorStage3();
       const code = `
         function logged(value) { return value; }
@@ -58,7 +53,7 @@ describe('Vite Plugin', () => {
       }
     });
 
-    it.skip('should include source maps', async () => {
+    it('should include source maps', async () => {
       const plugin = viteOxcDecoratorStage3();
       const code = `
         function logged(value) { return value; }

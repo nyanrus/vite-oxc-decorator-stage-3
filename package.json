@@ -55,12 +55,14 @@
     "url": "https://github.com/nyanrus/vite-oxc-decorator-stage-3/issues"
   },
   "homepage": "https://github.com/nyanrus/vite-oxc-decorator-stage-3#readme",
+  "dependencies": {
+    "@babel/core": "^7.23.0",
+    "@babel/plugin-proposal-decorators": "^7.23.0"
+  },
   "peerDependencies": {
     "vite": "^4.0.0 || ^5.0.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.23.0",
-    "@babel/plugin-proposal-decorators": "^7.23.0",
     "@bytecodealliance/jco": "^1.0.0",
     "@types/babel__core": "^7.20.5",
     "@types/node": "^20.11.0",

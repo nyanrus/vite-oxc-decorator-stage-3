@@ -1,4 +1,7 @@
 import type { Plugin } from 'vite';
+import { transformAsync } from '@babel/core';
+// @ts-expect-error - Babel plugin types
+import decoratorsPlugin from '@babel/plugin-proposal-decorators';
 
 export interface ViteOxcDecoratorOptions {
   /**
@@ -14,46 +17,11 @@ export interface ViteOxcDecoratorOptions {
   exclude?: RegExp | RegExp[];
 }
 
-// Type for WASM Component Model transformer (jco-generated)
-interface TransformResult {
-  code: string;
-  map?: string;
-  errors: string[];
-}
-
-interface WasmTransformer {
-  transform(filename: string, sourceText: string, options: string): TransformResult | { tag: 'err', val: string };
-}
-
-let wasmTransformer: WasmTransformer | null = null;
-
 /**
- * Load the WASM transformer module (jco-generated)
- */
-async function loadWasmTransformer(): Promise<WasmTransformer> {
-  if (wasmTransformer) {
-    return wasmTransformer;
-  }
-
-  try {
-    // Load the jco-generated WASM Component
-    const wasm = await import('../pkg/transformer.js');
-    wasmTransformer = wasm as unknown as WasmTransformer;
-    return wasmTransformer;
-  } catch (e) {
-    throw new Error(
-      `Failed to load WASM transformer. ` +
-      `Please build the WASM module first: npm run build:wasm && npm run build:jco\n` +
-      `Error: ${e}`
-    );
-  }
-}
-
-/**
- * Vite plugin for transforming Stage 3 decorators using oxc WASM transformer
+ * Vite plugin for transforming Stage 3 decorators using Babel
  * 
- * This plugin uses a Rust/WASM Component Model transformer built with oxc
- * to transform decorators following the TC39 Stage 3 proposal semantics.
+ * This plugin uses Babel's @babel/plugin-proposal-decorators to transform
+ * decorators following the TC39 Stage 3 proposal semantics.
  * 
  * @example
  * ```ts
@@ -85,19 +53,10 @@ export default function viteOxcDecoratorStage3(
     return includePatterns.some((pattern) => pattern.test(id));
   };
 
-  let wasmInit: Promise<WasmTransformer> | null = null;
-
   return {
     name: 'vite-oxc-decorator-stage-3',
 
     enforce: 'pre', // Run before other plugins
-
-    async buildStart() {
-      // Initialize WASM transformer
-      if (!wasmInit) {
-        wasmInit = loadWasmTransformer();
-      }
-    },
 
     async transform(code: string, id: string) {
       if (!shouldTransform(id)) {
@@ -109,34 +68,23 @@ export default function viteOxcDecoratorStage3(
         return null;
       }
 
-      // Load WASM transformer
-      const wasm = await wasmInit;
-      if (!wasm) {
-        throw new Error('WASM transformer not initialized');
-      }
-
       try {
-        // Call Component Model transform function
-        const options = JSON.stringify({ source_maps: true });
-        const result = wasm.transform(id, code, options);
-        
-        // Check if result is an error (Component Model Result type)
-        if (typeof result === 'object' && 'tag' in result && result.tag === 'err') {
-          throw new Error(`WASM transformer error in ${id}: ${result.val}`);
+        // Transform using Babel with Stage 3 decorators
+        const result = await transformAsync(code, {
+          filename: id,
+          plugins: [[decoratorsPlugin, { version: '2023-11' }]],
+          sourceMaps: true,
+          configFile: false,
+          babelrc: false,
+        });
+
+        if (!result || !result.code) {
+          return null;
         }
-        
-        const transformResult = result as TransformResult;
-        
-        // Check for transformation errors
-        if (transformResult.errors.length > 0) {
-          throw new Error(
-            `WASM transformer errors in ${id}:\n${transformResult.errors.join('\n')}`
-          );
-        }
-        
+
         return {
-          code: transformResult.code,
-          map: transformResult.map ? JSON.parse(transformResult.map) : null,
+          code: result.code,
+          map: result.map,
         };
       } catch (error) {
         // Re-throw with better context
