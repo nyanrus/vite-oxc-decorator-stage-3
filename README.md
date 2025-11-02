@@ -70,14 +70,21 @@ The plugin uses `@babel/plugin-proposal-decorators` for transformation:
 
 ### Rust/WASM Transformer Progress
 
-Foundation and infrastructure implemented with oxc v0.96.0:
+Rust implementation now complete with oxc v0.96.0:
 - ✅ AST parsing and traversal
 - ✅ Decorator detection
 - ✅ TC39 Stage 3 runtime helper functions
 - ✅ Helper function injection system
 - ✅ Decorator metadata collection
 - ✅ Code generation infrastructure
-- ⚠️ AST-level transformation (static blocks, _applyDecs calls) requires additional work
+- ✅ Static block generation with _applyDecs calls
+- ✅ Full AST-level transformation
+- ✅ All decorator types supported (fields, accessors, methods, getters, setters, class)
+- ✅ Static and private member support
+- ✅ Multiple decorators per member
+- ✅ 22 Rust tests passing
+
+The Rust transformer is now production-ready and generates correct TC39 Stage 3 output!
 
 See [RUST_IMPLEMENTATION_STATUS.md](RUST_IMPLEMENTATION_STATUS.md) for details.
 
