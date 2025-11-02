@@ -108,6 +108,20 @@ pub fn transform(
     // Generate code from transformed AST
     let mut codegen_result = Codegen::new().build(&parse_result.program);
     
+    // Inject static blocks into the generated code
+    let transformations = transformer.transformations.borrow();
+    for transformation in transformations.iter() {
+        // Find the class in the generated code and inject the static block
+        // Look for "class ClassName {" and inject static block after the opening brace
+        let class_pattern = format!("class {} {{", transformation.class_name);
+        if let Some(pos) = codegen_result.code.find(&class_pattern) {
+            let injection_point = pos + class_pattern.len();
+            let before = &codegen_result.code[..injection_point];
+            let after = &codegen_result.code[injection_point..];
+            codegen_result.code = format!("{}\n  {}{}", before, transformation.static_block_code, after);
+        }
+    }
+    
     // Inject helper functions at the beginning of the code
     if transformer.needs_helpers() {
         let helpers = generate_helper_functions();
@@ -303,6 +317,11 @@ mod tests {
             assert!(res.code.contains("function _setFunctionName"));
             assert!(res.code.contains("function _checkInRHS"));
             
+            // Static block should be injected
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("_applyDecs(this"));
+            assert!(res.code.contains("[_initProto, _initClass]"));
+            
             // Original code should still be present (without @decorator syntax)
             assert!(res.code.contains("class C"));
             assert!(res.code.contains("function logged"));
@@ -365,6 +384,44 @@ mod tests {
         assert!(result.is_ok());
         if let Ok(res) = result {
             assert!(res.map.is_none());
+        }
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+    
+    #[test]
+    #[ignore] // Only run explicitly
+    fn test_print_transformed_output() {
+        let code = r#"
+function logged(value, { kind, name }) {
+    if (kind === "method") {
+        return function (...args) {
+            console.log(`calling ${name}`);
+            return value.call(this, ...args);
+        };
+    }
+}
+
+class C {
+    @logged
+    m(arg) {
+        return arg * 2;
+    }
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== TRANSFORMED CODE ===\n{}\n=== END ===\n", res.code);
         }
     }
 }
