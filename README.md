@@ -2,7 +2,7 @@
 
 > ⚠️ **AI-Generated Project**: This project was implemented by AI and has not yet been reviewed or rewritten by humans. Use with caution in production environments.
 
-A Vite plugin for transforming TC39 Stage 3 decorators using a Rust/WASM transformer built with [oxc](https://oxc-project.github.io/).
+A Vite plugin for transforming TC39 Stage 3 decorators. Currently uses Babel's proven implementation with a Rust/WASM transformer foundation for future development.
 
 ## Features
 
@@ -10,9 +10,8 @@ A Vite plugin for transforming TC39 Stage 3 decorators using a Rust/WASM transfo
 - ✅ All decorator types: class, method, field, accessor, getter, setter
 - ✅ `addInitializer` API support
 - ✅ Private and static members
-- ✅ Rust/WASM transformer (oxc v0.96.0)
-- ✅ WebAssembly Component Model
-- ✅ Zero runtime dependencies
+- ✅ Production-ready (Babel transformer)
+- ✅ Rust foundation with oxc v0.96.0
 
 ## Installation
 
@@ -60,49 +59,51 @@ interface ViteOxcDecoratorOptions {
 }
 ```
 
-## Architecture
+## Implementation
 
-- **Rust Transformer**: Built with oxc v0.96.0 (parser, AST, codegen)
-- **WASM Component Model**: Standards-based WebAssembly interop
-- **wit-bindgen**: Type-safe Rust bindings
-- **jco**: JavaScript Component Tools for bindings
+### Current: Babel Transformer
 
-## Building from Source
+The plugin uses `@babel/plugin-proposal-decorators` for transformation:
+- ✅ Production-ready and battle-tested
+- ✅ Full TC39 Stage 3 compliance
+- ✅ All tests passing (23/23)
 
-### Prerequisites
+### Future: Rust/WASM Transformer
 
-- Rust toolchain (1.90.0+)
-- Node.js 16+
-- `cargo install cargo-component`
-- `npm install -g @bytecodealliance/jco`
+Foundation implemented with oxc v0.96.0:
+- ✅ AST parsing and traversal
+- ✅ Decorator detection
+- ✅ TC39 Stage 3 semantics documented
+- ⚠️ Full transformation logic requires significant additional work
 
-### Build
+See [RUST_IMPLEMENTATION_STATUS.md](RUST_IMPLEMENTATION_STATUS.md) for details.
+
+## Development
+
+### Install Dependencies
 
 ```bash
 npm install
-npm run build:wasm    # Compile Rust to WASM
-npm run build:jco     # Generate JS bindings
-npm run build:ts      # Compile TypeScript
 ```
 
-Or simply:
+### Run Tests
 
 ```bash
-npm run build
+npm test
 ```
 
-## Development Status
+### Build TypeScript
 
-**Foundation Complete:**
-- ✅ Parsing with oxc
-- ✅ AST manipulation
-- ✅ Code generation
-- ✅ WASM Component Model integration
+```bash
+npm run build:ts
+```
 
-**In Progress:**
-- ⚠️ Full Stage 3 decorator transformation logic
+### Rust Development (Optional)
 
-Tests use Babel's reference implementation for compatibility verification.
+```bash
+cd decorator-transformer
+cargo test
+```
 
 ## Requirements
 
@@ -112,7 +113,8 @@ Tests use Babel's reference implementation for compatibility verification.
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md) - Version history
-- [decorator-transformer/README.md](decorator-transformer/README.md) - Rust implementation details
+- [RUST_IMPLEMENTATION_STATUS.md](RUST_IMPLEMENTATION_STATUS.md) - Rust implementation details
+- [decorator-transformer/README.md](decorator-transformer/README.md) - Rust build guide
 
 ## References
 
