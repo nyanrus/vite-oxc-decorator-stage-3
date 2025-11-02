@@ -16,8 +16,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Migrated from wasm-bindgen to wit-bindgen
-- Build system: cargo-component + jco
-- Target: wasm32-wasip1 (Component Model)
+- Build system: wit-bindgen direct integration with cargo build
+- Target: wasm32-wasip2 (Component Model)
 - Babel moved to devDependencies (tests only)
 - Removed `useWasm` and `babel` options
 

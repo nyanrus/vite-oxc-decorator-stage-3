@@ -12,17 +12,18 @@ mod codegen;
 use transformer::{DecoratorTransformer, TransformerState};
 use codegen::generate_helper_functions;
 
+// Generate bindings from WIT file
+wit_bindgen::generate!({
+    world: "transformer",
+    exports: {
+        world: Component,
+    },
+});
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TransformOptions {
     #[serde(default = "default_true")]
     pub source_maps: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct TransformResult {
-    pub code: String,
-    pub map: Option<String>,
-    pub errors: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -117,6 +118,19 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
             let after = &code[injection_point..];
             *code = format!("{}\n  {}{}", before, transformation.static_block_code, after);
         }
+    }
+}
+
+// Implement the WIT interface
+struct Component;
+
+impl Guest for Component {
+    fn transform(
+        filename: String,
+        source_text: String,
+        options: String,
+    ) -> Result<TransformResult, String> {
+        transform(filename, source_text, options)
     }
 }
 

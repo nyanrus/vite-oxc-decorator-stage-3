@@ -9,18 +9,17 @@ Rust-based transformer for TC39 Stage 3 decorators, built with oxc and compiled 
 ### Prerequisites
 
 - Rust toolchain (1.90.0+)
-- `rustup target add wasm32-wasip1`
-- `cargo install cargo-component`
+- `rustup target add wasm32-wasip2`
 - `npm install -g @bytecodealliance/jco`
 
 ### Build Commands
 
 ```bash
-# Build WASM Component
-cargo component build --release
+# Build WASM component (wasip2 produces components directly)
+cargo build --target wasm32-wasip2 --release
 
 # Generate JavaScript bindings
-jco transpile target/wasm32-wasip1/release/decorator_transformer.wasm -o ../pkg
+jco transpile target/wasm32-wasip2/release/decorator_transformer.wasm -o ../pkg
 ```
 
 Or from project root:
