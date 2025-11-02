@@ -15,8 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - wit-bindgen for WebAssembly Component Model bindings
   - jco (JavaScript Component Tools) for JavaScript bindings
 - **WIT Interface Definition**: Defined transformer interface using WebAssembly Interface Types
-- **Hybrid Architecture**: WASM Component transformer with Babel fallback
-- `useWasm` option to enable experimental Rust transformer
+- **WASM-only Architecture**: WASM Component transformer as the primary (and only) implementation
 - Build scripts for WASM Component compilation (`build:wasm`, `build:jco`)
 - decorator-transformer Rust crate with Component Model support
 - Comprehensive documentation for Rust/WASM Component implementation
@@ -25,10 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Migrated from wasm-bindgen to wit-bindgen**: Now uses WebAssembly Component Model
 - **Build system**: Uses cargo-component and jco instead of wasm-pack
 - **Target**: Changed from wasm32-unknown-unknown to wasm32-wasip1
-- Plugin now supports both WASM Component and Babel transformation backends
+- **Removed Babel fallback**: WASM is now the only transformer implementation
+- **Babel moved to devDependencies**: Only used in tests for compatibility verification
+- Removed `useWasm` option - WASM is always used
 - Updated TypeScript bridge to handle Component Model Result types
 - Enhanced README with Component Model architecture explanation
 - Updated all documentation with wit-bindgen/jco references
+
+### Removed
+- Babel transformer fallback from production code
+- `useWasm` option (WASM is now the only option)
+- `babel` configuration option
 
 ## [0.1.0] - 2024-11-02
 
@@ -46,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Study of TC39 proposal-decorators reference implementation
 
 ### Implementation Notes
-- Uses Babel's `@babel/plugin-proposal-decorators` with `version: '2023-11'`
+- Uses Babel's `@babel/plugin-proposal-decorators` with `version: '2023-11'` for testing
 - Researched oxc AST structure and transformer patterns from v0.96.0
 - Studied TC39 Stage 3 decorator proposal semantics
 - Analyzed Babel reference implementation for transformation logic

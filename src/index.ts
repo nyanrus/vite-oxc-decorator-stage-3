@@ -1,7 +1,4 @@
 import type { Plugin } from 'vite';
-import { transformAsync, type TransformOptions } from '@babel/core';
-// @ts-expect-error - Babel plugin types
-import decoratorsPlugin from '@babel/plugin-proposal-decorators';
 
 export interface ViteOxcDecoratorOptions {
   /**
@@ -15,18 +12,6 @@ export interface ViteOxcDecoratorOptions {
    * @default [/node_modules/]
    */
   exclude?: RegExp | RegExp[];
-
-  /**
-   * Use WASM transformer (experimental)
-   * Falls back to Babel if WASM is not available
-   * @default false
-   */
-  useWasm?: boolean;
-
-  /**
-   * Babel transform options (used when WASM is not available or disabled)
-   */
-  babel?: TransformOptions;
 }
 
 // Type for WASM Component Model transformer (jco-generated)
@@ -45,31 +30,30 @@ let wasmTransformer: WasmTransformer | null = null;
 /**
  * Load the WASM transformer module (jco-generated)
  */
-async function loadWasmTransformer(): Promise<WasmTransformer | null> {
+async function loadWasmTransformer(): Promise<WasmTransformer> {
   if (wasmTransformer) {
     return wasmTransformer;
   }
 
   try {
-    // Try to load the jco-generated WASM Component
+    // Load the jco-generated WASM Component
     const wasm = await import('../pkg/transformer.js');
     wasmTransformer = wasm as unknown as WasmTransformer;
     return wasmTransformer;
   } catch (e) {
-    // WASM module not available, will fall back to Babel
-    console.warn('WASM transformer not available, falling back to Babel');
-    return null;
+    throw new Error(
+      `Failed to load WASM transformer. ` +
+      `Please build the WASM module first: npm run build:wasm && npm run build:jco\n` +
+      `Error: ${e}`
+    );
   }
 }
 
 /**
- * Vite plugin for transforming Stage 3 decorators
+ * Vite plugin for transforming Stage 3 decorators using oxc WASM transformer
  * 
- * This plugin can use either:
- * - Rust/WASM Component Model transformer built with oxc (experimental, set useWasm: true)
- * - Babel's decorator plugin (default, proven implementation)
- * 
- * Both follow the TC39 Stage 3 proposal semantics.
+ * This plugin uses a Rust/WASM Component Model transformer built with oxc
+ * to transform decorators following the TC39 Stage 3 proposal semantics.
  * 
  * @example
  * ```ts
@@ -77,9 +61,7 @@ async function loadWasmTransformer(): Promise<WasmTransformer | null> {
  * import decorators from 'vite-oxc-decorator-stage-3';
  * 
  * export default defineConfig({
- *   plugins: [
- *     decorators({ useWasm: true }) // Use experimental WASM transformer
- *   ],
+ *   plugins: [decorators()],
  * });
  * ```
  */
@@ -89,8 +71,6 @@ export default function viteOxcDecoratorStage3(
   const {
     include = [/\.[jt]sx?$/],
     exclude = [/node_modules/],
-    useWasm = false,
-    babel = {},
   } = options;
 
   const includePatterns = Array.isArray(include) ? include : [include];
@@ -105,7 +85,7 @@ export default function viteOxcDecoratorStage3(
     return includePatterns.some((pattern) => pattern.test(id));
   };
 
-  let wasmInit: Promise<WasmTransformer | null> | null = null;
+  let wasmInit: Promise<WasmTransformer> | null = null;
 
   return {
     name: 'vite-oxc-decorator-stage-3',
@@ -113,8 +93,8 @@ export default function viteOxcDecoratorStage3(
     enforce: 'pre', // Run before other plugins
 
     async buildStart() {
-      // Initialize WASM if requested
-      if (useWasm && !wasmInit) {
+      // Initialize WASM transformer
+      if (!wasmInit) {
         wasmInit = loadWasmTransformer();
       }
     },
@@ -129,66 +109,40 @@ export default function viteOxcDecoratorStage3(
         return null;
       }
 
-      // Try WASM transformer if enabled
-      if (useWasm && wasmInit) {
-        const wasm = await wasmInit;
-        if (wasm) {
-          try {
-            // Call Component Model transform function
-            const options = JSON.stringify({ source_maps: true });
-            const result = wasm.transform(id, code, options);
-            
-            // Check if result is an error (Component Model Result type)
-            if (typeof result === 'object' && 'tag' in result && result.tag === 'err') {
-              console.error(`WASM transformer error in ${id}:`, result.val);
-              // Fall through to Babel
-            } else {
-              const transformResult = result as TransformResult;
-              if (transformResult.errors.length > 0) {
-                console.error(`WASM transformer errors in ${id}:`, transformResult.errors);
-                // Fall through to Babel
-              } else {
-                return {
-                  code: transformResult.code,
-                  map: transformResult.map ? JSON.parse(transformResult.map) : null,
-                };
-              }
-            }
-          } catch (error) {
-            console.warn(`WASM transformer failed for ${id}, falling back to Babel:`, error);
-            // Fall through to Babel
-          }
-        }
+      // Load WASM transformer
+      const wasm = await wasmInit;
+      if (!wasm) {
+        throw new Error('WASM transformer not initialized');
       }
 
-      // Use Babel transformer (default or fallback)
       try {
-        const result = await transformAsync(code, {
-          filename: id,
-          sourceMaps: true,
-          sourceFileName: id,
-          plugins: [
-            [
-              decoratorsPlugin,
-              {
-                version: '2023-11', // Stage 3 decorators
-              },
-            ],
-          ],
-          ...babel,
-        });
-
-        if (!result || !result.code) {
-          return null;
+        // Call Component Model transform function
+        const options = JSON.stringify({ source_maps: true });
+        const result = wasm.transform(id, code, options);
+        
+        // Check if result is an error (Component Model Result type)
+        if (typeof result === 'object' && 'tag' in result && result.tag === 'err') {
+          throw new Error(`WASM transformer error in ${id}: ${result.val}`);
         }
-
+        
+        const transformResult = result as TransformResult;
+        
+        // Check for transformation errors
+        if (transformResult.errors.length > 0) {
+          throw new Error(
+            `WASM transformer errors in ${id}:\n${transformResult.errors.join('\n')}`
+          );
+        }
+        
         return {
-          code: result.code,
-          map: result.map,
+          code: transformResult.code,
+          map: transformResult.map ? JSON.parse(transformResult.map) : null,
         };
       } catch (error) {
-        // If transformation fails, let other plugins handle it
-        console.error(`Failed to transform decorators in ${id}:`, error);
+        // Re-throw with better context
+        if (error instanceof Error) {
+          throw new Error(`Failed to transform decorators in ${id}: ${error.message}`);
+        }
         throw error;
       }
     },
