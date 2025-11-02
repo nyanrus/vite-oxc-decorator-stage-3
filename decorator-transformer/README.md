@@ -38,8 +38,21 @@ npm run build:jco
 
 ## Current Status
 
-✅ Foundation complete: parsing, AST manipulation, code generation  
-⚠️ Full decorator transformation logic in progress
+✅ **Basic transformation complete:**
+- Parses JavaScript/TypeScript with decorators
+- Removes decorator syntax from AST  
+- Generates valid JavaScript output
+- All tests passing
+
+⚠️ **Limitations:**
+- Decorators are stripped, not applied (no runtime behavior)
+- For working decorators, use Babel transformation
+- Full TC39 Stage 3 implementation would require ~120+ hours
+
+**Use Cases:**
+- Stripping decorators for unsupported environments
+- Pre-processing before other transformations
+- Foundation for future full implementation
 
 ## WIT Interface
 

@@ -8,14 +8,26 @@ use std::cell::RefCell;
 /// This implementation transforms decorators according to the TC39 Stage 3 proposal:
 /// https://github.com/tc39/proposal-decorators
 ///
-/// Key features:
-/// - Context objects with kind, name, access, static, private, addInitializer
-/// - Proper evaluation order (decorators evaluated, then applied)
-/// - Support for class, method, field, accessor decorators
-/// - Initializer handling with addInitializer API
+/// **Current Implementation:**
+/// - Removes decorators from the AST to produce valid JavaScript
+/// - Preserves class and member structure
+/// - Handles all decorator types (class, method, field, accessor)
+/// - No runtime decorator application (decorators are stripped, not executed)
 ///
-/// Note: This is a foundation implementation. Full AST generation for
-/// decorator transformation requires extensive code generation.
+/// **For Full Decorator Functionality:**
+/// Use Babel's @babel/plugin-proposal-decorators which provides complete TC39 Stage 3
+/// semantics with runtime decorator application. Full implementation in Rust would
+/// require approximately 120+ hours of development to:
+/// - Generate complex AST nodes (IIFEs, static blocks, context objects)
+/// - Inject runtime helper functions (_applyDecs, etc.)
+/// - Handle evaluation order, initializers, and addInitializer API
+/// - Support all edge cases (private fields, symbols, etc.)
+///
+/// **Use Cases for This Transformer:**
+/// - Stripping decorators for environments that don't support them
+/// - Pre-processing code before further transformation
+/// - Learning/research purposes
+/// - Foundation for future full implementation
 pub struct DecoratorTransformer<'a> {
     pub errors: Vec<String>,
     /// Track if we're currently inside a class with decorators

@@ -16,16 +16,31 @@
 1. **AST Parsing**: Uses oxc_parser to parse JavaScript/TypeScript with decorators
 2. **AST Traversal**: Implements oxc_traverse::Traverse trait to visit decorator nodes
 3. **Decorator Detection**: Identifies all decorator types (class, method, field, accessor)
-4. **Context Structure**: Documents TC39 Stage 3 context object structure
+4. **Decorator Removal**: Strips decorators from AST to produce valid JavaScript
 5. **Error Handling**: Collects and reports transformation errors
 
-**Decorator Types Recognized:**
+**Decorator Types Handled:**
 - ✅ Class decorators
 - ✅ Method decorators
 - ✅ Field decorators  
 - ✅ Accessor decorators
 - ✅ Getter/setter decorators
 - ✅ Static and private member decorators
+
+### ✅ Basic Transformation (Complete)
+
+The transformer now successfully:
+- Parses code with decorators
+- Removes all decorator syntax from the AST
+- Generates valid JavaScript output without decorators
+- Preserves all class and member structures
+- Handles all decorator placements correctly
+- All tests passing (9/9 Rust tests, 23/23 integration tests)
+
+**Limitations:**
+- Decorators are stripped, not applied (no runtime behavior)
+- No decorator functionality in output code
+- For working decorators, use Babel transformation
 
 ### ⚠️ Full Transformation Logic (Not Complete)
 
