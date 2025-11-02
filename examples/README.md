@@ -1,57 +1,40 @@
 # Examples
 
-This directory contains example usage of the vite-oxc-decorator-stage-3 plugin.
+> ⚠️ **AI-Generated**: These examples were created by AI.
 
-## Running the Examples
+Examples demonstrating TC39 Stage 3 decorator usage with this plugin.
 
-1. Install dependencies in the examples directory:
-   ```bash
-   cd examples
-   npm install
-   ```
+## Running Examples
 
-2. Link the plugin from the parent directory:
-   ```bash
-   npm link ..
-   ```
-
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
-
-4. Open your browser to the displayed URL (usually http://localhost:5173)
+```bash
+cd examples
+npm install
+npm run dev
+```
 
 ## Files
 
-- **`vite.config.ts`**: Vite configuration with the decorator plugin
-- **`index.html`**: HTML page for the comprehensive demo
-- **`example.ts`**: Simple decorator examples from the TC39 proposal
-- **`comprehensive-example.ts`**: Full-featured demo showing all decorator types
+- `example.ts` - Basic decorator examples
+- `comprehensive-example.ts` - All decorator types
+- `index.html` - Demo page
+- `vite.config.ts` - Vite configuration
 
-## What You'll See
+## Quick Example
 
-The comprehensive example demonstrates:
+```typescript
+function logged(value, { kind, name }) {
+  if (kind === 'method') {
+    return function(...args) {
+      console.log(`${name} called`);
+      return value.apply(this, args);
+    };
+  }
+}
 
-1. **Class Decorators**: Metadata attachment using `addInitializer`
-2. **Method Decorators**: Logging method calls with parameter and return values
-3. **Field Decorators**: Validation of initial values
-4. **Auto-Accessor Decorators**: Tracking reads and writes to properties
-5. **Getter Decorators**: Memoization of computed values
-6. **Bound Method Decorators**: Automatic binding to instance
-7. **Private Member Decorators**: Decorating private methods
-
-All decorator calls are logged to the console, showing:
-- When decorators are applied
-- Method invocations
-- Property accesses
-- Validation results
-- Cache hits/misses
-
-## Building for Production
-
-```bash
-npm run build
+class Example {
+  @logged
+  greet(name) {
+    return `Hello ${name}`;
+  }
+}
 ```
-
-The built files will be in the `dist` directory.

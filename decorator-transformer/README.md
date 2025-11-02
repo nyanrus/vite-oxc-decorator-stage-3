@@ -1,27 +1,29 @@
-# Decorator Transformer (Rust/WASM Component Model)
+# Decorator Transformer (Rust/WASM)
 
-This is a Rust-based transformer for TC39 Stage 3 decorators, built with oxc and compiled to WebAssembly using the Component Model.
+> ⚠️ **AI-Generated**: This implementation was created by AI and has not been reviewed by humans.
+
+Rust-based transformer for TC39 Stage 3 decorators, built with oxc and compiled to WebAssembly Component Model.
 
 ## Building
 
 ### Prerequisites
 
-- Rust toolchain (1.90.0 or later)
-- wasm32-wasi target: `rustup target add wasm32-wasi`
-- cargo-component: `cargo install cargo-component`
-- jco (JavaScript Component Tools): `npm install -g @bytecodealliance/jco`
+- Rust toolchain (1.90.0+)
+- `rustup target add wasm32-wasip1`
+- `cargo install cargo-component`
+- `npm install -g @bytecodealliance/jco`
 
-### Build Steps
+### Build Commands
 
 ```bash
-# Build the WASM Component
+# Build WASM Component
 cargo component build --release
 
-# Generate JavaScript bindings using jco
-jco transpile target/wasm32-wasi/release/decorator_transformer.wasm -o ../pkg
+# Generate JavaScript bindings
+jco transpile target/wasm32-wasip1/release/decorator_transformer.wasm -o ../pkg
 ```
 
-Or use the npm scripts from the root directory:
+Or from project root:
 
 ```bash
 npm run build:wasm
@@ -30,20 +32,26 @@ npm run build:jco
 
 ## Architecture
 
-This transformer uses:
-- **oxc v0.96.0** for parsing, AST manipulation, and code generation
-- **wit-bindgen** for WebAssembly Component Model bindings
-- **jco** for generating JavaScript bindings from the Component
+- **oxc v0.96.0**: Parser, AST, and code generation
+- **wit-bindgen**: WebAssembly Component Model bindings
+- **WIT Interface**: Type-safe interface definition in `wit/world.wit`
 
-### WIT Interface
+## Current Status
 
-The transformer exposes a simple interface defined in `wit/world.wit`:
+✅ Foundation complete: parsing, AST manipulation, code generation  
+⚠️ Full decorator transformation logic in progress
+
+## WIT Interface
 
 ```wit
 package decorator:transformer;
 
 world transformer {
-  export transform: func(filename: string, source-text: string, options: string) -> result<transform-result, string>;
+  export transform: func(
+    filename: string, 
+    source-text: string, 
+    options: string
+  ) -> result<transform-result, string>;
 }
 
 record transform-result {
@@ -53,35 +61,10 @@ record transform-result {
 }
 ```
 
-## Current Status
-
-**Note**: This is the foundation for a Rust/WASM Component Model-based transformer. The current implementation:
-- ✅ Parses code using oxc
-- ✅ Generates code from AST
-- ✅ Exports Component Model interface
-- ✅ Uses wit-bindgen for Rust bindings
-- ⚠️  Does not yet transform decorators (passes through as-is)
-
-The full Stage 3 decorator transformation logic needs to be implemented in Rust. For production use, the plugin falls back to Babel's proven implementation.
-
-## Future Work
-
-To complete the Rust transformer:
-
-1. **AST Walking**: Implement visitor to find decorator nodes
-2. **Context Object**: Build decorator context (kind, name, access, etc.)
-3. **Transformation Logic**: 
-   - Method decorators → function wrapping
-   - Field decorators → initializer injection
-   - Accessor decorators → get/set replacement
-   - Class decorators → class wrapping
-4. **addInitializer**: Track and inject initializers
-5. **Evaluation Order**: Ensure correct decorator evaluation sequence
-
 ## References
 
 - [oxc Documentation](https://oxc-project.github.io/)
 - [TC39 Decorators Proposal](https://github.com/tc39/proposal-decorators)
 - [WebAssembly Component Model](https://github.com/WebAssembly/component-model)
 - [wit-bindgen](https://github.com/bytecodealliance/wit-bindgen)
-- [jco (JavaScript Component Tools)](https://github.com/bytecodealliance/jco)
+- [jco](https://github.com/bytecodealliance/jco)
