@@ -1,14 +1,4 @@
-/// Code generation utilities for TC39 Stage 3 decorator transformation
-/// 
-/// This module provides utilities to generate the complex JavaScript code
-/// needed for proper decorator transformation according to TC39 Stage 3 semantics.
-
-use std::fmt::Write;
-
-/// Generates the runtime helper functions needed for decorator transformation
-/// These are the minified Babel helper functions for TC39 Stage 3 decorators
 pub fn generate_helper_functions() -> &'static str {
-    // Note: Using multiline string to avoid escaping issues
     concat!(
         "function _applyDecs(e,t,n,r,o,i){",
         "var a,c,u,s,f,l,p,d=Symbol.metadata||Symbol.for(\"Symbol.metadata\"),",
@@ -47,93 +37,6 @@ pub fn generate_helper_functions() -> &'static str {
     )
 }
 
-/// Descriptor for a decorated element (method, field, accessor, etc.)
-#[derive(Debug, Clone)]
-pub struct DecoratorDescriptor {
-    pub decorator_names: Vec<String>,
-    pub kind: DecoratorKind,
-    pub key: String,
-    pub is_static: bool,
-    pub is_private: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DecoratorKind {
-    Field = 0,
-    Accessor = 1,
-    Method = 2,
-    Getter = 3,
-    Setter = 4,
-    Class = 5,
-}
-
-impl DecoratorDescriptor {
-    /// Generate the descriptor array element for _applyDecs
-    /// Format: [decorator, flags, key, isPrivate]
-    /// where flags = kind | (static ? 8 : 0) | (computed ? 16 : 0)
-    pub fn to_descriptor_code(&self) -> String {
-        let mut descriptors = Vec::new();
-        
-        for decorator_name in &self.decorator_names {
-            let flags = self.kind as u8 | if self.is_static { 8 } else { 0 };
-            let key_code = if self.is_private {
-                // Remove # prefix from private names for the descriptor
-                if self.key.starts_with('#') {
-                    format!("\"{}\"", &self.key[1..])
-                } else {
-                    format!("\"{}\"", self.key)
-                }
-            } else {
-                format!("\"{}\"", self.key)
-            };
-            
-            descriptors.push(format!(
-                "[{}, {}, {}, {}]",
-                decorator_name,
-                flags,
-                key_code,
-                if self.is_private { "true" } else { "false" }
-            ));
-        }
-        
-        descriptors.join(", ")
-    }
-}
-
-/// Generate a static initialization block for a class with decorators
-pub fn generate_static_init_block(
-    descriptors: &[DecoratorDescriptor],
-    class_decorators: &[String],
-    init_var_name: &str,
-) -> String {
-    let mut descriptor_array = String::from("[");
-    
-    for (i, desc) in descriptors.iter().enumerate() {
-        if i > 0 {
-            descriptor_array.push_str(", ");
-        }
-        descriptor_array.push_str(&desc.to_descriptor_code());
-    }
-    
-    descriptor_array.push(']');
-    
-    let class_dec_array = if class_decorators.is_empty() {
-        String::from("[]")
-    } else {
-        format!("[{}]", class_decorators.join(", "))
-    };
-    
-    format!(
-        "static {{\n    [{}] = _applyDecs(this, {}, {}).e;\n  }}",
-        init_var_name, class_dec_array, descriptor_array
-    )
-}
-
-/// Generate constructor initialization code
-pub fn generate_constructor_init(init_var_name: &str) -> String {
-    format!("{}(this);", init_var_name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,38 +49,5 @@ mod tests {
         assert!(helpers.contains("function _toPrimitive"));
         assert!(helpers.contains("function _setFunctionName"));
         assert!(helpers.contains("function _checkInRHS"));
-    }
-
-    #[test]
-    fn test_descriptor_generation() {
-        let desc = DecoratorDescriptor {
-            decorator_names: vec!["logged".to_string()],
-            kind: DecoratorKind::Method,
-            key: "m".to_string(),
-            is_static: false,
-            is_private: false,
-        };
-        
-        let code = desc.to_descriptor_code();
-        assert!(code.contains("logged"));
-        assert!(code.contains("\"m\""));
-    }
-
-    #[test]
-    fn test_static_init_block() {
-        let descriptors = vec![
-            DecoratorDescriptor {
-                decorator_names: vec!["logged".to_string()],
-                kind: DecoratorKind::Method,
-                key: "m".to_string(),
-                is_static: false,
-                is_private: false,
-            }
-        ];
-        
-        let block = generate_static_init_block(&descriptors, &[], "_initProto");
-        assert!(block.contains("static"));
-        assert!(block.contains("_applyDecs"));
-        assert!(block.contains("_initProto"));
     }
 }
