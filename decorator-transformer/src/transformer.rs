@@ -1,7 +1,7 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast::AstBuilder;
-use oxc_traverse::{Traverse, TraverseCtx, walk};
+use oxc_traverse::{Traverse, TraverseCtx};
 use std::cell::RefCell;
 
 /// Decorator transformer implementing TC39 Stage 3 decorator semantics
@@ -38,12 +38,8 @@ impl<'a> DecoratorTransformer<'a> {
         }
     }
 
-    /// Apply transformation to a program
-    pub fn transform_program(&mut self, program: &mut Program<'a>, _state: &mut TransformerState) {
-        // Walk the program AST using the Traverse trait
-        let mut ctx = TraverseCtx::new(program.scope_id, self.allocator);
-        walk::walk_program(self, program, &mut ctx);
-    }
+    // Note: Program traversal is now handled by the main transform function
+    // using traverse_mut from oxc_traverse
 
     /// Check if a class has any decorators (on class itself or members)
     fn has_decorators(&self, class: &Class<'a>) -> bool {
@@ -78,7 +74,7 @@ impl<'a> DecoratorTransformer<'a> {
     fn transform_class_with_decorators(
         &mut self,
         class: &mut Class<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        _ctx: &mut TraverseCtx<'a, TransformerState>,
     ) -> bool {
         if !self.has_decorators(class) {
             return false;
@@ -262,18 +258,18 @@ impl<'a> DecoratorTransformer<'a> {
 }
 
 impl<'a> Traverse<'a, TransformerState> for DecoratorTransformer<'a> {
-    fn enter_class(&mut self, class: &mut Class<'a>, ctx: &mut TraverseCtx<'a>) {
+    fn enter_class(&mut self, class: &mut Class<'a>, ctx: &mut TraverseCtx<'a, TransformerState>) {
         self.transform_class_with_decorators(class, ctx);
     }
 
-    fn exit_class(&mut self, _class: &mut Class<'a>, _ctx: &mut TraverseCtx<'a>) {
+    fn exit_class(&mut self, _class: &mut Class<'a>, _ctx: &mut TraverseCtx<'a, TransformerState>) {
         *self.in_decorated_class.borrow_mut() = false;
     }
 
     fn enter_method_definition(
         &mut self,
         method: &mut MethodDefinition<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        _ctx: &mut TraverseCtx<'a, TransformerState>,
     ) {
         if *self.in_decorated_class.borrow() {
             self.transform_method_decorators(method);
@@ -283,7 +279,7 @@ impl<'a> Traverse<'a, TransformerState> for DecoratorTransformer<'a> {
     fn enter_property_definition(
         &mut self,
         property: &mut PropertyDefinition<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        _ctx: &mut TraverseCtx<'a, TransformerState>,
     ) {
         if *self.in_decorated_class.borrow() {
             self.transform_field_decorators(property);
@@ -293,7 +289,7 @@ impl<'a> Traverse<'a, TransformerState> for DecoratorTransformer<'a> {
     fn enter_accessor_property(
         &mut self,
         accessor: &mut AccessorProperty<'a>,
-        _ctx: &mut TraverseCtx<'a>,
+        _ctx: &mut TraverseCtx<'a, TransformerState>,
     ) {
         if *self.in_decorated_class.borrow() {
             self.transform_accessor_decorators(accessor);
@@ -307,6 +303,8 @@ mod tests {
     use oxc_allocator::Allocator;
     use oxc_parser::Parser;
     use oxc_span::SourceType;
+    use oxc_traverse::traverse_mut;
+    use oxc_semantic::SemanticBuilder;
 
     #[test]
     fn test_transformer_creation() {
@@ -324,9 +322,14 @@ mod tests {
         let parser = Parser::new(&allocator, source_text, source_type);
         let mut parse_result = parser.parse();
 
+        // Build semantic information (scoping)
+        let semantic_ret = SemanticBuilder::new()
+            .build(&parse_result.program);
+        let scoping = semantic_ret.semantic.into_scoping();
+
         let mut transformer = DecoratorTransformer::new(&allocator);
-        let mut state = TransformerState;
-        transformer.transform_program(&mut parse_result.program, &mut state);
+        let state = TransformerState;
+        traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, state);
 
         // Transformer should detect the decorator
         assert!(transformer.errors.len() > 0);
@@ -342,9 +345,14 @@ mod tests {
         let parser = Parser::new(&allocator, source_text, source_type);
         let mut parse_result = parser.parse();
 
+        // Build semantic information (scoping)
+        let semantic_ret = SemanticBuilder::new()
+            .build(&parse_result.program);
+        let scoping = semantic_ret.semantic.into_scoping();
+
         let mut transformer = DecoratorTransformer::new(&allocator);
-        let mut state = TransformerState;
-        transformer.transform_program(&mut parse_result.program, &mut state);
+        let state = TransformerState;
+        traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, state);
 
         assert!(parse_result.program.body.len() > 0);
     }
@@ -358,9 +366,14 @@ mod tests {
         let parser = Parser::new(&allocator, source_text, source_type);
         let mut parse_result = parser.parse();
 
+        // Build semantic information (scoping)
+        let semantic_ret = SemanticBuilder::new()
+            .build(&parse_result.program);
+        let scoping = semantic_ret.semantic.into_scoping();
+
         let mut transformer = DecoratorTransformer::new(&allocator);
-        let mut state = TransformerState;
-        transformer.transform_program(&mut parse_result.program, &mut state);
+        let state = TransformerState;
+        traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, state);
 
         assert!(parse_result.program.body.len() > 0);
     }
