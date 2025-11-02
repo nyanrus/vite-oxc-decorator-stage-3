@@ -52,7 +52,7 @@ pub fn transform(
     let mut transformer = DecoratorTransformer::new(&allocator);
     
     if !transformer.check_for_decorators(&parse_result.program) {
-        return generate_result(parse_result.program, &opts, vec![]);
+        return generate_result(&parse_result.program, &opts, vec![]);
     }
 
     let semantic = SemanticBuilder::new().build(&parse_result.program);
@@ -86,7 +86,7 @@ fn parse_options(options: &str) -> Result<TransformOptions, String> {
     }
 }
 
-fn generate_result<'a>(program: Program<'a>, opts: &TransformOptions, errors: Vec<String>) -> Result<TransformResult, String> {
+fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: Vec<String>) -> Result<TransformResult, String> {
     let codegen_result = Codegen::new().build(&program);
     Ok(TransformResult {
         code: codegen_result.code,
