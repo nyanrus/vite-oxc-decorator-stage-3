@@ -10,17 +10,23 @@ Rust-based transformer for TC39 Stage 3 decorators, built with oxc and compiled 
 
 - Rust toolchain (1.90.0+)
 - `rustup target add wasm32-wasip1`
-- `cargo install cargo-component`
+- `cargo install wasm-tools`
 - `npm install -g @bytecodealliance/jco`
+- WASI adapter: Download `wasi_snapshot_preview1.reactor.wasm` from [Wasmtime releases](https://github.com/bytecodealliance/wasmtime/releases) and place in `decorator-transformer/` directory
 
 ### Build Commands
 
 ```bash
-# Build WASM Component
-cargo component build --release
+# Build WASM module
+cargo build --target wasm32-wasip1 --release
+
+# Convert to Component Model
+wasm-tools component new target/wasm32-wasip1/release/decorator_transformer.wasm \
+  -o target/wasm32-wasip1/release/decorator_transformer_component.wasm \
+  --adapt wasi_snapshot_preview1=wasi_snapshot_preview1.reactor.wasm
 
 # Generate JavaScript bindings
-jco transpile target/wasm32-wasip1/release/decorator_transformer.wasm -o ../pkg
+jco transpile target/wasm32-wasip1/release/decorator_transformer_component.wasm -o ../pkg
 ```
 
 Or from project root:

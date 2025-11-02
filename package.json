@@ -18,8 +18,8 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build:wasm": "cd decorator-transformer && cargo component build --release",
-    "build:jco": "jco transpile decorator-transformer/target/wasm32-wasi/release/decorator_transformer.wasm -o pkg",
+    "build:wasm": "cd decorator-transformer && cargo build --target wasm32-wasip1 --release && wasm-tools component new target/wasm32-wasip1/release/decorator_transformer.wasm -o target/wasm32-wasip1/release/decorator_transformer_component.wasm --adapt wasi_snapshot_preview1=wasi_snapshot_preview1.reactor.wasm",
+    "build:jco": "jco transpile decorator-transformer/target/wasm32-wasip1/release/decorator_transformer_component.wasm -o pkg",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:jco && npm run build:ts",
     "test": "vitest run",
