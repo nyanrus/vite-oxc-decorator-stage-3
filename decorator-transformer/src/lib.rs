@@ -108,6 +108,28 @@ pub fn transform(
     // Generate code from transformed AST
     let mut codegen_result = Codegen::new().build(&parse_result.program);
     
+    // Inject static blocks into the generated code
+    let transformations = transformer.transformations.borrow();
+    for transformation in transformations.iter() {
+        // Find the class in the generated code and inject the static block
+        // Try to match "class ClassName {" first
+        let class_pattern = format!("class {} {{", transformation.class_name);
+        let position = if let Some(pos) = codegen_result.code.find(&class_pattern) {
+            Some(pos + class_pattern.len())
+        } else if transformation.class_name == "AnonymousClass" {
+            // For anonymous classes, try to match just "class {"
+            codegen_result.code.find("class {").map(|pos| pos + "class {".len())
+        } else {
+            None
+        };
+        
+        if let Some(injection_point) = position {
+            let before = &codegen_result.code[..injection_point];
+            let after = &codegen_result.code[injection_point..];
+            codegen_result.code = format!("{}\n  {}{}", before, transformation.static_block_code, after);
+        }
+    }
+    
     // Inject helper functions at the beginning of the code
     if transformer.needs_helpers() {
         let helpers = generate_helper_functions();
@@ -303,6 +325,11 @@ mod tests {
             assert!(res.code.contains("function _setFunctionName"));
             assert!(res.code.contains("function _checkInRHS"));
             
+            // Static block should be injected
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("_applyDecs(this"));
+            assert!(res.code.contains("[_initProto, _initClass]"));
+            
             // Original code should still be present (without @decorator syntax)
             assert!(res.code.contains("class C"));
             assert!(res.code.contains("function logged"));
@@ -365,6 +392,281 @@ mod tests {
         assert!(result.is_ok());
         if let Ok(res) = result {
             assert!(res.map.is_none());
+        }
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+    
+    #[test]
+    #[ignore] // Only run explicitly
+    fn test_print_transformed_output() {
+        let code = r#"
+function logged(value, { kind, name }) {
+    if (kind === "method") {
+        return function (...args) {
+            console.log(`calling ${name}`);
+            return value.call(this, ...args);
+        };
+    }
+}
+
+class C {
+    @logged
+    m(arg) {
+        return arg * 2;
+    }
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== TRANSFORMED CODE ===\n{}\n=== END ===\n", res.code);
+        }
+    }
+
+    #[test]
+    fn test_field_decorator_transformation() {
+        let code = r#"
+function validated(value, { kind, name }) {
+    if (kind === "field") {
+        return function(initialValue) {
+            return initialValue;
+        };
+    }
+}
+
+class C {
+    @validated
+    field = 1;
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Static block should be injected with field decorator (kind=0)
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("_applyDecs(this"));
+            assert!(res.code.contains("validated"));
+            assert!(res.code.contains("\"field\""));
+            
+            // Decorator syntax removed
+            assert!(!res.code.contains("@validated"));
+            
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_accessor_decorator_transformation() {
+        let code = r#"
+function tracked(value, { kind }) {
+    if (kind === "accessor") {
+        return value;
+    }
+}
+
+class C {
+    @tracked
+    accessor data = 42;
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Static block should be injected with accessor decorator (kind=1)
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("tracked"));
+            assert!(res.code.contains("\"data\""));
+            assert!(!res.code.contains("@tracked"));
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_getter_setter_decorator_transformation() {
+        let code = r#"
+function logged(value, { kind }) {
+    return value;
+}
+
+class C {
+    @logged
+    get value() {
+        return this._value;
+    }
+    
+    @logged
+    set value(v) {
+        this._value = v;
+    }
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Static block should contain both getter (kind=3) and setter (kind=4)
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("logged"));
+            assert!(res.code.contains("\"value\""));
+            assert!(!res.code.contains("@logged"));
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_class_decorator_transformation() {
+        let code = r#"
+function metadata(data) {
+    return function(value, { kind }) {
+        if (kind === "class") {
+            return value;
+        }
+    };
+}
+
+@metadata({ version: "1.0" })
+class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Static block should reference class decorator
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("metadata"));
+            assert!(!res.code.contains("@metadata"));
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_multiple_decorators_on_same_member() {
+        let code = r#"
+function first(value) { return value; }
+function second(value) { return value; }
+
+class C {
+    @first
+    @second
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Static block should contain both decorators
+            assert!(res.code.contains("first"));
+            assert!(res.code.contains("second"));
+            assert!(res.code.contains("static {"));
+            assert!(!res.code.contains("@first"));
+            assert!(!res.code.contains("@second"));
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_static_member_decorators() {
+        let code = r#"
+function logged(value) { return value; }
+
+class C {
+    @logged
+    static staticMethod() {
+        return 42;
+    }
+    
+    @logged
+    static staticField = 100;
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Static block should handle static members
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("logged"));
+            assert!(!res.code.contains("@logged"));
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_private_member_decorators() {
+        let code = r#"
+function traced(value) { return value; }
+
+class C {
+    @traced
+    #privateMethod() {
+        return "private";
+    }
+    
+    @traced
+    #privateField = 42;
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Static block should handle private members
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("traced"));
+            // Private names should be in descriptors
+            assert!(res.code.contains("privateMethod") || res.code.contains("privateField"));
+            assert!(!res.code.contains("@traced"));
+            assert_eq!(res.errors.len(), 0);
         }
     }
 }
