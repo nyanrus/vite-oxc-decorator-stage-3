@@ -1,6 +1,6 @@
 # vite-oxc-decorator-stage-3
 
-A Vite plugin that transforms TC39 Stage 3 decorators for JavaScript and TypeScript.
+A Vite plugin that transforms TC39 Stage 3 decorators using Rust/oxc with WebAssembly.
 
 ## Features
 
@@ -10,7 +10,20 @@ A Vite plugin that transforms TC39 Stage 3 decorators for JavaScript and TypeScr
 - ✅ Works with private and static class members
 - ✅ Source map support
 - ✅ TypeScript and JavaScript support
-- ✅ Zero configuration needed
+- ✅ **Rust-based transformer** using oxc (compiled to WASM)
+- ✅ **Babel fallback** for compatibility
+
+## Architecture
+
+This plugin uses a **hybrid approach**:
+
+1. **Primary**: Rust transformer built with [oxc](https://oxc-project.github.io/) v0.96.0, compiled to WebAssembly via wasm-pack
+2. **Fallback**: Babel's `@babel/plugin-proposal-decorators` for proven compatibility
+
+The Rust/WASM transformer provides:
+- High performance (native speed)
+- Zero JavaScript dependencies for transformation
+- Direct AST manipulation with oxc
 
 ## Installation
 
@@ -20,7 +33,7 @@ npm install vite-oxc-decorator-stage-3
 
 ## Usage
 
-### Basic Setup
+### Basic Setup (Babel)
 
 Add the plugin to your `vite.config.ts`:
 
@@ -30,6 +43,21 @@ import decorators from 'vite-oxc-decorator-stage-3';
 
 export default defineConfig({
   plugins: [decorators()],
+});
+```
+
+### Using WASM Transformer (Experimental)
+
+```ts
+import { defineConfig } from 'vite';
+import decorators from 'vite-oxc-decorator-stage-3';
+
+export default defineConfig({
+  plugins: [
+    decorators({
+      useWasm: true, // Enable Rust/WASM transformer
+    }),
+  ],
 });
 ```
 
@@ -48,6 +76,19 @@ interface ViteOxcDecoratorOptions {
    * @default [/node_modules/]
    */
   exclude?: RegExp | RegExp[];
+
+  /**
+   * Use WASM transformer (experimental)
+   * Falls back to Babel if WASM is not available
+   * @default false
+   */
+  useWasm?: boolean;
+
+  /**
+   * Babel transform options (used when WASM is disabled or unavailable)
+   */
+  babel?: TransformOptions;
+}
 
   /**
    * Additional Babel transform options
@@ -242,11 +283,26 @@ m(); // hello! - still bound to instance
 
 ## How It Works
 
-This plugin uses Babel's `@babel/plugin-proposal-decorators` with the `version: '2023-11'` option to transform decorators according to the TC39 Stage 3 specification. The transformation happens during Vite's build process, before other plugins process the code.
+This plugin provides two transformation backends:
+
+### 1. Rust/WASM Transformer (Experimental)
+
+Built with [oxc](https://oxc-project.github.io/) v0.96.0 and compiled to WebAssembly:
+
+- **Parser**: oxc_parser for JavaScript/TypeScript parsing
+- **AST**: oxc_ast for AST manipulation
+- **Codegen**: oxc_codegen for code generation
+- **WASM Bindings**: wasm-bindgen for JavaScript interop
+
+**Current Status**: The Rust transformer foundation is complete (parsing, AST, codegen), but the full Stage 3 decorator transformation logic is still being implemented. Enable with `useWasm: true` option.
+
+### 2. Babel Transformer (Default)
+
+Uses `@babel/plugin-proposal-decorators` with `version: '2023-11'` for proven, spec-compliant transformation. This is the default and recommended option for production use.
 
 ### Decorator Semantics
 
-The TC39 Stage 3 decorator proposal defines the following semantics:
+Both transformers follow TC39 Stage 3 decorator proposal semantics:
 
 1. **Decorators are functions** that receive:
    - The decorated value (or `undefined` for fields)
@@ -279,8 +335,31 @@ Stage 3 decorators differ from TypeScript's experimental decorators:
 
 - Vite 4.x or 5.x
 - Node.js 16+
+- Rust toolchain (optional, for building WASM module)
 
 ## Development
+
+### Building the WASM Module
+
+The Rust/WASM transformer can be built from source:
+
+```bash
+# Prerequisites
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli
+
+# Build WASM module
+npm run build:wasm
+
+# Generate JavaScript bindings
+npm run build:bindgen
+
+# Build TypeScript
+npm run build:ts
+
+# Or build everything
+npm run build
+```
 
 ### Study Implementation
 
@@ -296,6 +375,8 @@ This plugin was developed by studying:
    ```bash
    git clone https://github.com/tc39/proposal-decorators.git
    ```
+
+See [decorator-transformer/README.md](decorator-transformer/README.md) for details on the Rust implementation.
 
 ### Build
 

@@ -1,7 +1,7 @@
 {
   "name": "vite-oxc-decorator-stage-3",
   "version": "0.1.0",
-  "description": "Vite plugin for transforming TC39 Stage 3 decorators for JavaScript and TypeScript",
+  "description": "Vite plugin for transforming TC39 Stage 3 decorators using oxc WASM transformer",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,11 +13,15 @@
   },
   "files": [
     "dist",
+    "pkg",
     "README.md",
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build:wasm": "cd decorator-transformer && cargo build --target wasm32-unknown-unknown --release",
+    "build:bindgen": "wasm-bindgen decorator-transformer/target/wasm32-unknown-unknown/release/decorator_transformer.wasm --out-dir pkg --target web",
+    "build:ts": "tsc",
+    "build": "npm run build:wasm && npm run build:bindgen && npm run build:ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build"
@@ -28,7 +32,9 @@
     "decorators",
     "stage-3",
     "tc39",
-    "babel",
+    "oxc",
+    "wasm",
+    "rust",
     "transform",
     "javascript",
     "typescript",

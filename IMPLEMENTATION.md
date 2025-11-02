@@ -2,188 +2,172 @@
 
 ## Overview
 
-This project implements a Vite plugin for transforming TC39 Stage 3 decorators by studying the oxc transformer architecture and the TC39 decorator proposal.
+This project implements a Vite plugin for transforming TC39 Stage 3 decorators using a **Rust-based transformer** built with oxc v0.96.0, compiled to WebAssembly, with a Babel fallback for compatibility.
 
-## Research Phase
+## Architecture Evolution
 
-### 1. oxc Repository Study (v0.96.0)
+### Initial Implementation (Commits 1-4)
 
-**Location**: `/tmp/oxc`
-**Tag**: `crates_v0.96.0`
+1. Studied oxc v0.96.0 transformer architecture
+2. Studied TC39 proposal-decorators  
+3. Implemented plugin using Babel as the transformation engine
 
-#### Key Findings:
+**Rationale**: oxc v0.96.0 only has legacy decorator support, not Stage 3.
 
-1. **AST Structure** (`crates/oxc_ast/src/ast/js.rs`):
-   - Decorator nodes are defined in the AST
-   - Decorators can be attached to classes, methods, properties, accessors
-   - AST provides visitor pattern for traversal
+### Current Implementation (Commit 5+)
 
-2. **Transformer Architecture** (`crates/oxc_transformer/src/decorator/`):
-   - Legacy decorator implementation exists (`decorator/legacy/`)
-   - Uses the Traverse trait for AST manipulation
-   - Decorators are processed in specific lifecycle hooks (enter/exit)
-   - No Stage 3 implementation in v0.96.0
+Based on feedback to implement the transformer in Rust using oxc:
 
-3. **Key Insight**: 
-   - oxc v0.96.0 only implements legacy decorators
-   - Stage 3 decorators require different transformation semantics
-   - The architecture uses a visitor pattern with enter/exit hooks
+1. **Rust Transformer** (`decorator-transformer/`):
+   - Built with oxc v0.96.0 (parser, AST, codegen)
+   - Compiled to WASM with wasm-bindgen
+   - Foundation complete, full transformation logic in progress
 
-### 2. TC39 Proposal Study
+2. **TypeScript Bridge** (`src/index.ts`):
+   - Hybrid approach: tries WASM first, falls back to Babel
+   - Option `useWasm: true` to enable Rust transformer
+   - Maintains backward compatibility
 
-**Location**: `/tmp/proposal-decorators`
+## Rust/WASM Transformer
 
-#### Key Findings from README.md:
+### Structure
 
-1. **Decorator Types**:
-   - Class decorators
-   - Method decorators  
-   - Field decorators (return initializer function)
-   - Auto-accessor decorators (new feature with `accessor` keyword)
-   - Getter/Setter decorators
+```
+decorator-transformer/
+├── Cargo.toml          # Rust dependencies (oxc 0.96.0)
+├── src/
+│   └── lib.rs          # WASM entry point and transformer logic
+└── README.md           # Build instructions
+```
 
-2. **Context Object**:
-   ```ts
-   {
-     kind: string;           // "class" | "method" | "field" | "accessor" | "getter" | "setter"
-     name: string | symbol;
-     access: {
-       get?(): unknown;
-       set?(value: unknown): void;
-     };
-     static?: boolean;
-     private?: boolean;
-     addInitializer(fn: () => void): void;
-   }
+### Build Process
+
+1. **Compile to WASM**:
+   ```bash
+   cd decorator-transformer
+   cargo build --target wasm32-unknown-unknown --release
    ```
 
-3. **Evaluation Order**:
-   - Decorators evaluated left-to-right, top-to-bottom
-   - Called during class definition
-   - Applied after all are evaluated
-   - Different timing for static vs instance elements
+2. **Generate JS Bindings**:
+   ```bash
+   wasm-bindgen target/wasm32-unknown-unknown/release/decorator_transformer.wasm \
+     --out-dir ../pkg --target web
+   ```
 
-4. **Transformation Patterns**:
-   - Method decorator: `method = decorator(method, context) ?? method`
-   - Field decorator: `field = initFn.call(this, initialValue)`
-   - Accessor decorator: Return `{get, set, init}` object
-   - Class decorator: `Class = decorator(Class, context) ?? Class`
+3. **TypeScript Build**:
+   ```bash
+   npm run build:ts
+   ```
 
-### 3. Babel Reference Implementation
+### Current Status
 
-The Babel implementation (`@babel/plugin-proposal-decorators` with `version: '2023-11'`) serves as the reference implementation for TC39 Stage 3 decorators.
+The Rust transformer currently:
+- ✅ Parses JavaScript/TypeScript using oxc_parser
+- ✅ Builds AST with oxc_ast
+- ✅ Generates code with oxc_codegen
+- ✅ Exposes WASM bindings via wasm-bindgen
+- ⚠️  Passes through code (doesn't transform decorators yet)
 
-**Why use Babel**:
-- Official reference implementation
-- Tested against TC39 test262 suite
-- Handles all edge cases correctly
-- Maintained by TC39 participants
+### Next Steps for Rust Implementation
 
-## Implementation Approach
+To complete the Stage 3 decorator transformation in Rust:
 
-Given that:
-1. oxc v0.96.0 doesn't have Stage 3 decorator support
-2. Babel has a mature, spec-compliant implementation
-3. The goal is a practical Vite plugin
+1. **AST Traversal**: Implement visitor to find decorator nodes
+2. **Context Object Creation**: Build decorator context with kind, name, access, etc.
+3. **Transformation Logic**:
+   - Method decorators → wrap with context call
+   - Field decorators → inject initializer function
+   - Accessor decorators → replace get/set
+   - Class decorators → wrap class
+4. **addInitializer Support**: Track and inject initializers
+5. **Evaluation Order**: Ensure correct decorator evaluation sequence
 
-**Decision**: Use Babel's decorator plugin for the transformation, informed by the oxc and TC39 studies.
+## TypeScript Bridge
 
-### Architecture
+The plugin (`src/index.ts`) uses a hybrid approach:
 
-```
-┌─────────────────┐
-│  Vite Project   │
-│  (with @decorators)│
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────┐
-│ vite-oxc-decorator-stage-3 │
-│      (Vite Plugin)          │
-└────────┬────────────────┘
-         │
-         ▼
-┌─────────────────────────┐
-│   Babel Transform       │
-│   @babel/plugin-proposal-decorators│
-│   (version: '2023-11')  │
-└────────┬────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Transformed Code│
-└─────────────────┘
+```typescript
+async transform(code: string, id: string) {
+  // Try WASM if enabled
+  if (useWasm && wasmTransformer) {
+    try {
+      return await wasmTransformer.transform(id, code, options);
+    } catch (error) {
+      // Fall through to Babel
+    }
+  }
+  
+  // Use Babel (default or fallback)
+  return await transformWithBabel(code, id);
+}
 ```
 
-### Plugin Implementation
+This ensures:
+- Production stability (Babel is proven)
+- Future-ready (WASM can be enabled when complete)
+- Graceful fallback (WASM errors don't break builds)
 
-The plugin (`src/index.ts`):
+## Benefits of Rust/WASM Approach
 
-1. **File Filtering**: 
-   - Include: `/\.[jt]sx?$/` by default
-   - Exclude: `/node_modules/` by default
-   - Quick check: Skip files without `@` symbol
+1. **Performance**: Native speed, no JavaScript overhead
+2. **Type Safety**: Rust's type system catches errors at compile time
+3. **Memory Efficiency**: Manual memory management via arena allocator
+4. **Future-Proof**: Can leverage oxc improvements as they're released
+5. **No Dependencies**: WASM bundle is self-contained
 
-2. **Transformation**:
-   - Use `@babel/core` transformAsync API
-   - Configure `@babel/plugin-proposal-decorators` with `version: '2023-11'`
-   - Generate source maps
+## Hybrid Strategy Benefits
 
-3. **Integration**:
-   - `enforce: 'pre'` - Run before other plugins
-   - Return `{ code, map }` for successful transformations
-   - Return `null` for files that don't need transformation
+1. **Immediate Usability**: Babel transformer works now
+2. **Progressive Enhancement**: Can enable WASM when ready
+3. **Risk Mitigation**: Fallback ensures reliability
+4. **Testing Ground**: Can compare outputs between implementations
 
-## Lessons from oxc Study
+## Research and Study
 
-While we use Babel for the actual transformation, studying oxc provided valuable insights:
+### oxc Repository Study (v0.96.0)
 
-1. **Performance Considerations**:
-   - Early filtering (check for `@` before parsing)
-   - Process files in parallel
-   - Efficient AST traversal patterns
+**Key Findings**:
 
-2. **Architecture Patterns**:
-   - Visitor pattern for AST manipulation
-   - Separate concerns (parsing, transformation, generation)
-   - Lifecycle hooks (enter/exit)
+1. **AST Structure**: Decorator nodes, visitor pattern, arena allocator
+2. **Transformer Pattern**: Traverse trait with enter/exit hooks
+3. **Legacy Decorators**: Reference for implementation patterns
 
-3. **Future Improvements**:
-   - When oxc adds Stage 3 support, the plugin can switch to native oxc
-   - The current architecture allows easy swapping of the transformer
-   - Keep the same public API
+### TC39 Proposal Study
 
-## Testing Strategy
+**Key Learnings**:
 
-Tests cover all decorator types from TC39 proposal:
+1. **Decorator Types**: class, method, field, accessor, getter, setter
+2. **Context Object**: Rich metadata for each decorator type
+3. **Evaluation Order**: Specific timing for different element types
+4. **addInitializer**: Lifecycle hooks for setup code
 
-1. **Method Decorators**: Basic transformation, context object
-2. **Field Decorators**: Initializer functions
-3. **Accessor Decorators**: Auto-accessor with get/set/init
-4. **Class Decorators**: Class replacement, addInitializer
-5. **Getter/Setter Decorators**: Individual decoration
-6. **Private Members**: Private fields and methods
-7. **Static Members**: Static fields and methods
-8. **Multiple Decorators**: Stacking decorators
-9. **addInitializer**: Timing and execution
+### Babel Reference Implementation
 
-Each test verifies:
-- Successful transformation
-- Presence of key code patterns
-- No syntax errors in output
+Uses `@babel/plugin-proposal-decorators` with `version: '2023-11'` as the gold standard.
 
-## Compatibility
+## Testing
 
-The implementation follows the TC39 Stage 3 proposal exactly as implemented in Babel with `version: '2023-11'`, ensuring:
+Test suite (23 tests) covers all decorator types and runs against Babel transformer.
 
-- Compatibility with future JavaScript standards
-- Interoperability with other tools using the same spec
-- Correct semantics for all decorator types
-- Proper evaluation and application order
+## Build Tools
 
-## Future Work
+- **Rust**: 1.90.0
+- **wasm-bindgen**: 0.2.105
+- **oxc**: 0.96.0
+- **TypeScript**: 5.3.3
+- **Vite**: 5.0.0
 
-1. **Native oxc Support**: When oxc adds Stage 3 decorator transformation, integrate it
-2. **Performance Optimization**: Benchmark and optimize for large codebases
-3. **Extended Testing**: Add more complex real-world scenarios
-4. **TypeScript Integration**: Better TypeScript decorator metadata support
+## Future Enhancements
+
+1. **Complete Rust Transformer**: Full Stage 3 decorator transformation
+2. **Performance Benchmarks**: Compare WASM vs Babel
+3. **Source Maps**: Improve WASM source map generation
+4. **Error Messages**: Better error reporting from Rust
+5. **Optimization**: Size and speed optimizations for WASM
+
+## Conclusion
+
+This implementation provides:
+- **Now**: Production-ready Babel transformer
+- **Future**: High-performance Rust/WASM transformer
+- **Always**: Spec-compliant TC39 Stage 3 decorator support

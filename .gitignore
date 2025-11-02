@@ -12,3 +12,5 @@ coverage/
 .turbo
 .tmp/
 tmp/
+decorator-transformer/target/
+pkg/

@@ -17,16 +17,57 @@ export interface ViteOxcDecoratorOptions {
   exclude?: RegExp | RegExp[];
 
   /**
-   * Babel transform options
+   * Use WASM transformer (experimental)
+   * Falls back to Babel if WASM is not available
+   * @default false
+   */
+  useWasm?: boolean;
+
+  /**
+   * Babel transform options (used when WASM is not available or disabled)
    */
   babel?: TransformOptions;
+}
+
+// Type for WASM module
+interface WasmTransformer {
+  transform(filename: string, code: string, options: any): Promise<{
+    code: string;
+    map?: string;
+    errors: string[];
+  }>;
+}
+
+let wasmTransformer: WasmTransformer | null = null;
+
+/**
+ * Load the WASM transformer module
+ */
+async function loadWasmTransformer(): Promise<WasmTransformer | null> {
+  if (wasmTransformer) {
+    return wasmTransformer;
+  }
+
+  try {
+    // Try to load the WASM module
+    const wasm = await import('../pkg/decorator_transformer.js');
+    wasmTransformer = wasm as unknown as WasmTransformer;
+    return wasmTransformer;
+  } catch (e) {
+    // WASM module not available, will fall back to Babel
+    console.warn('WASM transformer not available, falling back to Babel');
+    return null;
+  }
 }
 
 /**
  * Vite plugin for transforming Stage 3 decorators
  * 
- * This plugin uses Babel's decorator plugin to transform decorators
- * following the TC39 Stage 3 proposal semantics.
+ * This plugin can use either:
+ * - Rust/WASM transformer built with oxc (experimental, set useWasm: true)
+ * - Babel's decorator plugin (default, proven implementation)
+ * 
+ * Both follow the TC39 Stage 3 proposal semantics.
  * 
  * @example
  * ```ts
@@ -34,7 +75,9 @@ export interface ViteOxcDecoratorOptions {
  * import decorators from 'vite-oxc-decorator-stage-3';
  * 
  * export default defineConfig({
- *   plugins: [decorators()],
+ *   plugins: [
+ *     decorators({ useWasm: true }) // Use experimental WASM transformer
+ *   ],
  * });
  * ```
  */
@@ -44,6 +87,7 @@ export default function viteOxcDecoratorStage3(
   const {
     include = [/\.[jt]sx?$/],
     exclude = [/node_modules/],
+    useWasm = false,
     babel = {},
   } = options;
 
@@ -59,10 +103,19 @@ export default function viteOxcDecoratorStage3(
     return includePatterns.some((pattern) => pattern.test(id));
   };
 
+  let wasmInit: Promise<WasmTransformer | null> | null = null;
+
   return {
     name: 'vite-oxc-decorator-stage-3',
 
     enforce: 'pre', // Run before other plugins
+
+    async buildStart() {
+      // Initialize WASM if requested
+      if (useWasm && !wasmInit) {
+        wasmInit = loadWasmTransformer();
+      }
+    },
 
     async transform(code: string, id: string) {
       if (!shouldTransform(id)) {
@@ -74,6 +127,30 @@ export default function viteOxcDecoratorStage3(
         return null;
       }
 
+      // Try WASM transformer if enabled
+      if (useWasm && wasmInit) {
+        const wasm = await wasmInit;
+        if (wasm) {
+          try {
+            const result = await wasm.transform(id, code, { source_maps: true });
+            
+            if (result.errors.length > 0) {
+              console.error(`WASM transformer errors in ${id}:`, result.errors);
+              // Fall through to Babel
+            } else {
+              return {
+                code: result.code,
+                map: result.map ? JSON.parse(result.map) : null,
+              };
+            }
+          } catch (error) {
+            console.warn(`WASM transformer failed for ${id}, falling back to Babel:`, error);
+            // Fall through to Babel
+          }
+        }
+      }
+
+      // Use Babel transformer (default or fallback)
       try {
         const result = await transformAsync(code, {
           filename: id,
