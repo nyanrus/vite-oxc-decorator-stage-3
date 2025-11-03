@@ -103,6 +103,12 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 /// Find the absolute position where variable declarations should be injected
 /// by analyzing the text before the class keyword.
 ///
+/// NOTE: This function uses string manipulation. An AST-based approach would:
+/// - Traverse up to the parent Statement/ModuleDeclaration node
+/// - Check if it's an ExportDeclaration wrapping the ClassDeclaration
+/// - Insert VariableDeclaration before the export/class statement
+/// - Use AST node positions from the traverse context
+///
 /// This function is designed to work with oxc-generated code output, which is
 /// well-formed and doesn't contain comments or strings in unexpected positions.
 ///
@@ -118,6 +124,7 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 /// # Returns
 /// The absolute position where variable declarations should be injected
 fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
+    // NOTE: Using string rfind() here. AST approach would check parent node type
     // Find the start of the current line in before_class
     let line_start = before_class.rfind('\n')
         .map(|pos| pos + 1)
@@ -143,8 +150,27 @@ fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
     }
 }
 
+/// Inject static blocks and variable declarations into generated code
+/// 
+/// NOTE: This function uses string manipulation (find, format) on generated code.
+/// An AST-based approach would:
+/// 1. During AST traversal, directly insert StaticBlock nodes into class.body.body
+/// 2. Insert VariableDeclaration nodes before ClassDeclaration in the program body
+/// 3. Modify or create Constructor nodes in the AST
+/// 4. Use the stored class_span for positioning instead of string search
+/// 
+/// Challenges with pure AST approach:
+/// - Requires access to parent statement list to insert var declarations
+/// - oxc's arena allocator makes node ownership transfer complex
+/// - Need to use AstBuilder from TraverseCtx to create new nodes
+/// 
+/// This hybrid approach works but could be improved by:
+/// - Parsing static block code into AST and inserting during traversal
+/// - Using class_span information for span-based positioning
+/// - Building descriptor arrays as Expression nodes instead of strings
 fn inject_static_blocks(code: &mut String, transformations: &[transformer::ClassTransformation]) {
     for transformation in transformations {
+        // NOTE: Using string find() here. AST approach would use class_span to know position
         // Search for "class ClassName" followed eventually by "{"
         // This handles: class C {, class C extends X {, etc.
         let class_name_pattern = format!("class {}", transformation.class_name);
@@ -196,7 +222,17 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
 }
 
 /// Inject _initProto call into constructor
+/// 
+/// NOTE: This function uses string find() to locate constructor in generated code.
+/// An AST-based approach would:
+/// 1. During AST traversal in enter_class, find or create Constructor MethodDefinition
+/// 2. Insert the _initProto(this) call statement into constructor body
+/// 3. Handle super() calls by inserting after the super() statement
+/// 4. Use AstBuilder to create the if statement and call expression nodes
+/// 
+/// This would avoid string manipulation entirely.
 fn inject_constructor_init(code: &mut String, _class_name: &str, class_body_start: usize) {
+    // NOTE: Using string find() here. AST approach would iterate class.body.body elements
     // Find the constructor within the class body
     let class_body = &code[class_body_start..];
     

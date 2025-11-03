@@ -1,3 +1,53 @@
+//! Decorator Transformer - TC39 Stage 3 Decorator Implementation
+//!
+//! This module implements decorator transformation using oxc's AST.
+//!
+//! ## AST-Based Approach
+//!
+//! The transformer follows an AST-based approach where possible:
+//!
+//! 1. **Decorator Expressions**: Stored as AST Expression nodes, not strings
+//!    - Uses `generate_expression_code()` with Codegen to convert AST to code
+//!    - Original decorator expressions preserved in AST during collection
+//!
+//! 2. **Class Span Tracking**: Stores `Span` information for positioning
+//!    - `ClassTransformation.class_span` provides AST-based position info
+//!    - Avoids string-based class name search where possible
+//!
+//! 3. **Metadata Collection**: Uses AST traversal
+//!    - `collect_decorator_metadata()` iterates AST nodes
+//!    - `DecoratorAstMetadata` struct stores Expression references
+//!
+//! ## Hybrid Approach (Current Implementation)
+//!
+//! Due to oxc's arena allocator and transformation complexity, some operations
+//! use a hybrid approach:
+//!
+//! 1. **Static Block Generation**: 
+//!    - Currently uses `format!()` to build code strings
+//!    - TODO: Build as Expression/Statement AST nodes using AstBuilder
+//!    - See `generate_static_block_code()` for improvement opportunities
+//!
+//! 2. **Code Injection**:
+//!    - Currently uses string `find()` on generated code
+//!    - TODO: Insert AST nodes during traversal using `class.body.body.insert()`
+//!    - Challenges: Need parent access for var declarations
+//!
+//! 3. **Constructor Modification**:
+//!    - Currently uses string manipulation
+//!    - TODO: Modify Function.body.statements directly in AST
+//!    - See `ensure_constructor_with_init()` for AST-based approach skeleton
+//!
+//! ## Future Improvements
+//!
+//! To make this fully AST-based:
+//! 1. Use `AstBuilder` (via `ctx.ast`) to create StaticBlock nodes
+//! 2. Build descriptor arrays as ArrayExpression with proper element nodes
+//! 3. Insert nodes during traversal, not post-codegen
+//! 4. Use two-pass traversal if parent access needed for var declarations
+//!
+//! See oxc's own transformers for reference implementations.
+
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_traverse::{Traverse, TraverseCtx};
@@ -226,11 +276,19 @@ impl<'a> DecoratorTransformer<'a> {
         metadata: &[DecoratorMetadata],
         class_decorators: &[String],
     ) -> String {
+        // NOTE: This function uses format! to build code strings.
+        // An AST-based approach would build Expression nodes for the descriptors
+        // and use AstBuilder to create the static block node structure.
+        // See DecoratorAstMetadata for the AST-based metadata structure.
+        
         let descriptors: Vec<String> = metadata.iter()
             .flat_map(|meta| {
                 meta.decorator_names.iter().map(move |decorator_name| {
                     let flags = (meta.kind as u8) | if meta.is_static { 8 } else { 0 };
                     let key = if meta.is_private { &meta.key[1..] } else { &meta.key };
+                    // TODO: Replace with AST node building:
+                    // - Build array expression with decorator, flags, key, isPrivate
+                    // - Use AstBuilder to create proper Expression nodes
                     format!("[{}, {}, \"{}\", {}]", decorator_name, flags, key, meta.is_private)
                 })
             })
@@ -240,6 +298,7 @@ impl<'a> DecoratorTransformer<'a> {
         let class_dec_array = format!("[{}]", class_decorators.join(", "));
         
         // Generate the appropriate static block based on whether there are class decorators
+        // TODO: Build this as AST nodes using AstBuilder instead of string formatting
         if class_decorators.is_empty() {
             // Only member decorators - use .e property and call _initClass if defined
             format!(
@@ -310,6 +369,17 @@ impl<'a> DecoratorTransformer<'a> {
 #[derive(Debug, Clone)]
 struct DecoratorMetadata {
     decorator_names: Vec<String>,
+    kind: DecoratorKind,
+    is_static: bool,
+    is_private: bool,
+    key: String,
+}
+
+/// AST-based decorator metadata that stores Expression references
+/// instead of generated code strings
+#[derive(Debug)]
+struct DecoratorAstMetadata<'a> {
+    decorator_expressions: Vec<&'a Expression<'a>>,  // Store AST nodes, not strings
     kind: DecoratorKind,
     is_static: bool,
     is_private: bool,
