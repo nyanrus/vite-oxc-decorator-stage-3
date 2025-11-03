@@ -12,37 +12,41 @@
 //!
 //! 2. **Class Span Tracking**: Stores `Span` information for positioning
 //!    - `ClassTransformation.class_span` provides AST-based position info
-//!    - Used for accurate code injection instead of string search
+//!    - Avoids string-based class name search where possible
 //!
 //! 3. **Metadata Collection**: Uses AST traversal
 //!    - `collect_decorator_metadata()` iterates AST nodes
-//!    - Decorator expressions extracted directly from AST
+//!    - `DecoratorAstMetadata` struct stores Expression references
 //!
 //! ## Hybrid Approach (Current Implementation)
 //!
-//! Due to oxc's arena allocator and traverse constraints, some operations
-//! use a hybrid approach that leverages AST information:
+//! Due to oxc's arena allocator and transformation complexity, some operations
+//! use a hybrid approach:
 //!
 //! 1. **Static Block Generation**: 
-//!    - Uses `format!()` for initial code generation
-//!    - TODO: Consider using AstBuilder for complex expressions
+//!    - Currently uses `format!()` to build code strings
+//!    - TODO: Build as Expression/Statement AST nodes using AstBuilder
+//!    - See `generate_static_block_code()` for improvement opportunities
 //!
 //! 2. **Code Injection**:
-//!    - Uses `class_span` from AST for positioning (AST-based)
-//!    - Injects post-codegen to avoid breaking traverse
+//!    - Currently uses string `find()` on generated code
+//!    - TODO: Insert AST nodes during traversal using `class.body.body.insert()`
+//!    - Challenges: Need parent access for var declarations
 //!
 //! 3. **Constructor Modification**:
-//!    - Uses string manipulation post-codegen
-//!    - AST modification during traverse breaks the walk
+//!    - Currently uses string manipulation
+//!    - TODO: Modify Function.body.statements directly in AST
+//!    - See `ensure_constructor_with_init()` for AST-based approach skeleton
 //!
-//! ## Why Not Full AST Modification?
+//! ## Future Improvements
 //!
-//! oxc's traverse model and arena allocator make certain operations challenging:
-//! - Modifying AST during traverse can break the walk (unwrap panics)
-//! - Transferring nodes between allocators is complex
-//! - Parent access for var declarations requires special handling
+//! To make this fully AST-based:
+//! 1. Use `AstBuilder` (via `ctx.ast`) to create StaticBlock nodes
+//! 2. Build descriptor arrays as ArrayExpression with proper element nodes
+//! 3. Insert nodes during traversal, not post-codegen
+//! 4. Use two-pass traversal if parent access needed for var declarations
 //!
-//! The current approach balances AST-based positioning with pragmatic code generation.
+//! See oxc's own transformers for reference implementations.
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;

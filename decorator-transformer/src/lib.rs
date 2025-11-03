@@ -103,10 +103,14 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 /// Find the absolute position where variable declarations should be injected
 /// by analyzing the text before the class keyword.
 ///
-/// **AST-based context:**
-/// This function works on post-codegen output where decorator syntax has been removed.
-/// An ideal AST approach would insert VariableDeclaration nodes before the ClassDeclaration
-/// during traversal, but oxc's traverse model makes parent access complex.
+/// NOTE: This function uses string manipulation. An AST-based approach would:
+/// - Traverse up to the parent Statement/ModuleDeclaration node
+/// - Check if it's an ExportDeclaration wrapping the ClassDeclaration
+/// - Insert VariableDeclaration before the export/class statement
+/// - Use AST node positions from the traverse context
+///
+/// This function is designed to work with oxc-generated code output, which is
+/// well-formed and doesn't contain comments or strings in unexpected positions.
 ///
 /// This handles cases like:
 /// - `class C {}` -> returns position before 'class'
@@ -115,7 +119,7 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 ///
 /// # Arguments
 /// * `before_class` - The text content before the 'class' keyword
-/// * `class_pos` - The absolute position where 'class' keyword starts
+/// * `class_pos` - The absolute position where 'class' keyword starts (must be valid)
 ///
 /// # Returns
 /// The absolute position where variable declarations should be injected
@@ -146,20 +150,24 @@ fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
     }
 }
 
-/// Inject static blocks and variable declarations into generated code.
+/// Inject static blocks and variable declarations into generated code
 /// 
-/// **AST-based elements:**
-/// - Class names extracted from AST (via `class.id`)
-/// - Decorator expressions converted using Codegen (AST-based)
-/// - Class span stored for reference (though post-codegen positions shift)
+/// NOTE: This function uses string manipulation (find, format) on generated code.
+/// An AST-based approach would:
+/// 1. During AST traversal, directly insert StaticBlock nodes into class.body.body
+/// 2. Insert VariableDeclaration nodes before ClassDeclaration in the program body
+/// 3. Modify or create Constructor nodes in the AST
+/// 4. Use the stored class_span for positioning instead of string search
 /// 
-/// **Why post-codegen injection:**
-/// oxc's traverse model and arena allocator make direct AST modification challenging:
-/// - Modifying AST during traverse can break the walk
-/// - Span positions shift after decorator removal during codegen
-/// - Parent access needed for variable declaration insertion
+/// Challenges with pure AST approach:
+/// - Requires access to parent statement list to insert var declarations
+/// - oxc's arena allocator makes node ownership transfer complex
+/// - Need to use AstBuilder from TraverseCtx to create new nodes
 /// 
-/// This approach balances AST-based metadata extraction with pragmatic code injection.
+/// This hybrid approach works but could be improved by:
+/// - Parsing static block code into AST and inserting during traversal
+/// - Using class_span information for span-based positioning
+/// - Building descriptor arrays as Expression nodes instead of strings
 fn inject_static_blocks(code: &mut String, transformations: &[transformer::ClassTransformation]) {
     for transformation in transformations {
         // NOTE: Using string find() here. AST approach would use class_span to know position
@@ -213,16 +221,16 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
     }
 }
 
-/// Inject _initProto call into constructor.
+/// Inject _initProto call into constructor
 /// 
-/// **AST-based context:**
-/// Works on post-codegen output. An ideal AST approach would modify Function.body.statements
-/// during traversal, but this requires careful handling of the traverse lifecycle.
+/// NOTE: This function uses string find() to locate constructor in generated code.
+/// An AST-based approach would:
+/// 1. During AST traversal in enter_class, find or create Constructor MethodDefinition
+/// 2. Insert the _initProto(this) call statement into constructor body
+/// 3. Handle super() calls by inserting after the super() statement
+/// 4. Use AstBuilder to create the if statement and call expression nodes
 /// 
-/// This function:
-/// 1. Locates the constructor in generated code
-/// 2. Inserts _initProto(this) call at the correct position (after super() if present)
-/// 3. Creates a new constructor if one doesn't exist
+/// This would avoid string manipulation entirely.
 fn inject_constructor_init(code: &mut String, _class_name: &str, class_body_start: usize) {
     // NOTE: Using string find() here. AST approach would iterate class.body.body elements
     // Find the constructor within the class body
