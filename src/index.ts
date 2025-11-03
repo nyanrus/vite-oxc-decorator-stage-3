@@ -64,8 +64,9 @@ async function tryLoadWasmTransformer(): Promise<WasmTransformer | null> {
  * Transform code using Babel (fallback transformer)
  */
 async function transformWithBabel(code: string, id: string): Promise<{ code: string; map: any } | null> {
-  // Determine if file is TypeScript
-  const isTypeScript = /\.[mc]?tsx?$/.test(id);
+  // Pattern matches .ts, .tsx, .mts, .cts files (TypeScript)
+  const TYPESCRIPT_FILE_PATTERN = /\.[mc]?tsx?$/;
+  const isTypeScript = TYPESCRIPT_FILE_PATTERN.test(id);
   
   const result = await transformAsync(code, {
     filename: id,
