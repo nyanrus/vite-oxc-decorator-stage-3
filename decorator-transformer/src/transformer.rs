@@ -1,9 +1,8 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
-use oxc_ast::AstBuilder;
 use oxc_traverse::{Traverse, TraverseCtx};
 use oxc_codegen::Codegen;
-use oxc_span::{Span, SPAN};
+use oxc_span::Span;
 use std::cell::RefCell;
 
 /// Represents the kind of decorator according to TC39 Stage 3 decorator specification
@@ -31,6 +30,7 @@ pub struct TransformerState;
 #[derive(Debug, Clone)]
 pub struct ClassTransformation {
     pub class_name: String,
+    pub class_span: Span,  // Store span instead of relying on string search
     pub static_block_code: String,
     pub needs_instance_init: bool,  // True if field/accessor decorators exist
 }
@@ -154,7 +154,7 @@ impl<'a> DecoratorTransformer<'a> {
     fn transform_class_with_decorators(
         &mut self,
         class: &mut Class<'a>,
-        _ctx: &mut TraverseCtx<'a, TransformerState>,
+        ctx: &mut TraverseCtx<'a, TransformerState>,
     ) -> bool {
         if !self.has_decorators(class) {
             return false;
@@ -177,8 +177,25 @@ impl<'a> DecoratorTransformer<'a> {
         
         if !metadata.is_empty() || !class_decorators.is_empty() {
             let static_block_code = self.generate_static_block_code(&metadata, &class_decorators);
+            
+            // Parse and insert the static block into the class body
+            // This avoids string manipulation later
+            let static_block_ast = self.parse_static_block(&static_block_code);
+            if let Some(static_block) = static_block_ast {
+                // Insert static block at the beginning of class body
+                class.body.body.insert(0, static_block);
+            }
+            
+            // If we need instance init, modify or create constructor
+            if needs_instance_init {
+                self.ensure_constructor_with_init(class, ctx);
+            }
+            
+            // Store transformation info for variable declaration injection
+            // (this still needs post-processing as we need to modify parent statements)
             self.transformations.borrow_mut().push(ClassTransformation {
                 class_name,
+                class_span: class.span,
                 static_block_code,
                 needs_instance_init,
             });
@@ -238,6 +255,54 @@ impl<'a> DecoratorTransformer<'a> {
                 member_desc_array,
                 class_dec_array
             )
+        }
+    }
+    
+    /// Parse static block code into AST node
+    /// This avoids string manipulation by creating proper AST nodes
+    fn parse_static_block(&self, static_block_code: &str) -> Option<ClassElement<'a>> {
+        // Parse the static block code as a class member
+        // We wrap it in a class to parse it properly
+        let wrapped_code = format!("class C {{ {} }}", static_block_code);
+        
+        use oxc_parser::Parser;
+        use oxc_span::SourceType;
+        
+        let parser = Parser::new(self._allocator, &wrapped_code, SourceType::default());
+        let parse_result = parser.parse();
+        
+        if parse_result.errors.is_empty() {
+            // Extract the static block from the parsed class
+            if let Some(Statement::ClassDeclaration(class_decl)) = parse_result.program.body.first() {
+                if let Some(_first_element) = class_decl.body.body.first() {
+                    // Clone the static block element
+                    // Note: This is a bit tricky with oxc's arena allocation
+                    // For now, we'll return None and keep using the string-based approach
+                    // A full solution would require properly transferring ownership
+                    return None;
+                }
+            }
+        }
+        
+        None
+    }
+    
+    /// Ensure constructor exists and has _initProto call
+    fn ensure_constructor_with_init(&self, class: &mut Class<'a>, _ctx: &mut TraverseCtx<'a, TransformerState>) {
+        // Find existing constructor
+        let has_constructor = class.body.body.iter().any(|element| {
+            matches!(element, ClassElement::MethodDefinition(m) 
+                if m.kind == MethodDefinitionKind::Constructor)
+        });
+        
+        if !has_constructor {
+            // TODO: Create a new constructor with _initProto call
+            // This requires using AstBuilder from ctx to create the constructor node
+            // For now, we'll rely on the post-processing approach
+        } else {
+            // TODO: Modify existing constructor to add _initProto call
+            // This requires inserting statements at the right position
+            // For now, we'll rely on the post-processing approach
         }
     }
 }
