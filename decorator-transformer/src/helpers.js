@@ -17,7 +17,7 @@
  * @param {Array} memberDecorators - Array of member decorator descriptors
  * @param {Array} classDecorators - Array of class-level decorators
  * @param {string} className - Name of the class (for error messages)
- * @param {number} parentClass - Parent class for inheritance
+ * @param {Function} parentClass - Parent class for inheritance
  * @param {Object} metadata - Metadata object for Symbol.metadata
  * @returns {Object} Object with initialization functions
  */
@@ -75,10 +75,10 @@ function _applyDecs(
    * @param {boolean} isOptional - Whether undefined is allowed
    */
   function assertCallable(value, description, verb, isOptional) {
-    if (typeof value !== "function" && (isOptional || value !== undefined)) {
+    if (typeof value !== "function" && (!isOptional || value !== undefined)) {
       throw new TypeError(
         description + " must " + (verb || "be") + " a function" +
-        (isOptional ? "" : " or undefined")
+        (!isOptional ? " or undefined" : "")
       );
     }
     return value;
@@ -362,7 +362,7 @@ function _applyDecs(
       var kind = flags & 7; // Extract kind bits
       
       // Check if this decorator matches the current pass
-      if ((flags & 8) == isStatic && !kind == isPrivate) {
+      if ((flags & 8) == isStatic && (!kind) == isPrivate) {
         var memberName = decoratorInfo[2];
         var isPrivateMember = !!decoratorInfo[3];
         var hasPairedDecorator = flags & 16;
@@ -499,7 +499,7 @@ function _setFunctionName(fn, name, prefix) {
  */
 function _checkInRHS(value) {
   if (Object(value) !== value) {
-    throw TypeError(
+    throw new TypeError(
       "right-hand side of 'in' should be an object, got " +
       (value !== null ? typeof value : "null")
     );
