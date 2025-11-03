@@ -18,6 +18,8 @@
 
 import viteOxcDecoratorStage3 from '../dist/index.js';
 import { writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const testCases = [
   {
@@ -141,7 +143,7 @@ async function runTests() {
       }
       
       // Save transformed code to a file
-      const filename = `/tmp/test-${testCase.name.replace(/\s+/g, '-').toLowerCase()}.mjs`;
+      const filename = join(tmpdir(), `test-${testCase.name.replace(/\s+/g, '-').toLowerCase()}.mjs`);
       writeFileSync(filename, result.code);
       
       console.log(`Transformed code saved to: ${filename}`);
@@ -149,7 +151,7 @@ async function runTests() {
       console.log('-'.repeat(60));
       
       // Execute the transformed code
-      const module = await import(filename);
+      const module = await import(filename + '?t=' + Date.now());
       
       console.log('-'.repeat(60));
       console.log('✓ Test passed!\n');

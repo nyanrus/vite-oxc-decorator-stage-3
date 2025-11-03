@@ -64,12 +64,14 @@ async function test() {
   
   // Save and try to execute
   const fs = await import('fs');
-  const tmpFile = '/tmp/simple-runtime-test.mjs';
+  const os = await import('os');
+  const path = await import('path');
+  const tmpFile = path.join(os.tmpdir(), 'simple-runtime-test.mjs');
   fs.writeFileSync(tmpFile, result.code);
   
   console.log('Executing transformed code...');
   try {
-    const module = await import(tmpFile);
+    const module = await import(tmpFile + '?t=' + Date.now());
     console.log('✅ Code executes without errors!');
     console.log('  - Class instantiated successfully');
     console.log('  - Method callable:', typeof module.TestClass.prototype.method === 'function');
