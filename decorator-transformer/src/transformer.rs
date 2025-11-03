@@ -1,7 +1,9 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
+use oxc_ast::AstBuilder;
 use oxc_traverse::{Traverse, TraverseCtx};
 use oxc_codegen::Codegen;
+use oxc_span::{Span, SPAN};
 use std::cell::RefCell;
 
 /// Represents the kind of decorator according to TC39 Stage 3 decorator specification
