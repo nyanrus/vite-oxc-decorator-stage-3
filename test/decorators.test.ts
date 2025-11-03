@@ -310,4 +310,35 @@ describe('Stage 3 Decorator Transformation', () => {
       expect(output).toContain('function logged');
     });
   });
+
+  describe('Decorator call expressions', () => {
+    it('should handle decorator call with import.meta.hot', async () => {
+      const input = `
+        function noraComponent(hotCtx) {
+          return function(value, context) {
+            if (context.kind === 'class') {
+              return value;
+            }
+          };
+        }
+
+        class NoraComponentBase {}
+
+        @noraComponent(import.meta.hot)
+        export default class BrowserShareMode extends NoraComponentBase {
+          init() {
+            console.log("test");
+          }
+        }
+      `;
+
+      const output = await transformCode(input);
+      console.log('===== TRANSFORMED OUTPUT =====');
+      console.log(output);
+      console.log('===== END OUTPUT =====');
+      expect(output).toBeTruthy();
+      expect(output).toContain('function noraComponent');
+      expect(output).toContain('class BrowserShareMode');
+    });
+  });
 });
