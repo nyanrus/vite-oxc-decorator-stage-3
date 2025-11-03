@@ -2,6 +2,8 @@ import type { Plugin } from 'vite';
 import { transformAsync } from '@babel/core';
 // @ts-expect-error - Babel plugin types
 import decoratorsPlugin from '@babel/plugin-proposal-decorators';
+// @ts-expect-error - Babel preset types
+import typescriptPreset from '@babel/preset-typescript';
 
 export interface ViteOxcDecoratorOptions {
   /**
@@ -62,8 +64,12 @@ async function tryLoadWasmTransformer(): Promise<WasmTransformer | null> {
  * Transform code using Babel (fallback transformer)
  */
 async function transformWithBabel(code: string, id: string): Promise<{ code: string; map: any } | null> {
+  // Determine if file is TypeScript
+  const isTypeScript = /\.[mc]?tsx?$/.test(id);
+  
   const result = await transformAsync(code, {
     filename: id,
+    presets: isTypeScript ? [[typescriptPreset, { onlyRemoveTypeImports: true }]] : [],
     plugins: [[decoratorsPlugin, { version: '2023-11' }]],
     sourceMaps: true,
   });
