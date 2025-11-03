@@ -230,21 +230,17 @@ impl<'a> DecoratorTransformer<'a> {
         if !metadata.is_empty() || !class_decorators.is_empty() {
             let static_block_code = self.generate_static_block_code(&metadata, &class_decorators);
             
-            // Parse and insert the static block into the class body
-            // This avoids string manipulation later
-            let static_block_ast = self.parse_static_block(&static_block_code);
-            if let Some(static_block) = static_block_ast {
-                // Insert static block at the beginning of class body
-                class.body.body.insert(0, static_block);
-            }
+            // TODO: Parse and insert the static block into the class body during traversal
+            // This would avoid string manipulation later. See parse_static_block() for approach.
+            // Currently using post-codegen string injection due to allocator complexity.
             
             // If we need instance init, modify or create constructor
             if needs_instance_init {
                 self.ensure_constructor_with_init(class, ctx);
             }
             
-            // Store transformation info for variable declaration injection
-            // (this still needs post-processing as we need to modify parent statements)
+            // Store transformation info for variable declaration and static block injection
+            // (post-processing needed as we need to modify parent statements)
             self.transformations.borrow_mut().push(ClassTransformation {
                 class_name,
                 class_span: class.span,
@@ -319,32 +315,26 @@ impl<'a> DecoratorTransformer<'a> {
         }
     }
     
-    /// Parse static block code into AST node
-    /// This avoids string manipulation by creating proper AST nodes
-    fn parse_static_block(&self, static_block_code: &str) -> Option<ClassElement<'a>> {
-        // Parse the static block code as a class member
-        // We wrap it in a class to parse it properly
-        let wrapped_code = format!("class C {{ {} }}", static_block_code);
-        
-        use oxc_parser::Parser;
-        use oxc_span::SourceType;
-        
-        let parser = Parser::new(self._allocator, &wrapped_code, SourceType::default());
-        let parse_result = parser.parse();
-        
-        if parse_result.errors.is_empty() {
-            // Extract the static block from the parsed class
-            if let Some(Statement::ClassDeclaration(class_decl)) = parse_result.program.body.first() {
-                if let Some(_first_element) = class_decl.body.body.first() {
-                    // Clone the static block element
-                    // Note: This is a bit tricky with oxc's arena allocation
-                    // For now, we'll return None and keep using the string-based approach
-                    // A full solution would require properly transferring ownership
-                    return None;
-                }
-            }
-        }
-        
+    /// Parse static block code into AST node (Placeholder Implementation)
+    /// 
+    /// NOTE: This is a placeholder showing the direction for AST-based approach.
+    /// Currently returns None because transferring parsed nodes between allocators
+    /// is complex with oxc's arena allocation model.
+    /// 
+    /// Full implementation would:
+    /// 1. Parse the static block code
+    /// 2. Extract the StaticBlock node
+    /// 3. Transfer ownership to the current allocator
+    /// 4. Return the node for insertion
+    /// 
+    /// For now, we rely on post-codegen string injection.
+    #[allow(dead_code)]  // Placeholder for future AST-based implementation
+    fn parse_static_block(&self, _static_block_code: &str) -> Option<ClassElement<'a>> {
+        // TODO: Implement proper AST node parsing and transfer
+        // Challenges:
+        // - oxc uses arena allocation, can't easily transfer nodes between allocators
+        // - Would need to rebuild nodes using ctx.ast in the transform method
+        // - Alternative: build nodes directly using AstBuilder instead of parsing
         None
     }
     
