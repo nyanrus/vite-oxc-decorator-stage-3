@@ -1,168 +1,74 @@
-/**
- * Runtime Test Example
- * 
- * This file demonstrates the Rust/WASM decorator transformer in action.
- * 
- * Current Status:
- * - ✅ Code transforms successfully (decorators removed, static blocks added, helpers injected)
- * - ✅ Variable declarations (_initProto, _initClass) are correctly generated
- * - ✅ Transformed code executes without syntax errors
- * - ⚠️  Decorator runtime behavior is incomplete (helper function implementation needs work)
- * 
- * Note: The TC39 Stage 3 decorator helper functions are complex and this AI-generated
- * implementation is not yet fully compliant with the specification. The transformation
- * itself is correct, but the runtime behavior of decorators is not yet working as expected.
- * 
- * Run with: node test/runtime-example.mjs
- */
+// Test the actual runtime behavior of decorators
+import { transform } from '../pkg/decorator_transformer.js';
 
-import viteOxcDecoratorStage3 from '../dist/index.js';
-import { writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-
-const testCases = [
-  {
-    name: 'Method Decorator',
-    code: `
-      const calls = [];
-      
-      function logged(value, { kind, name }) {
-        if (kind === "method") {
-          return function (...args) {
-            calls.push(\`calling \${name}\`);
-            const ret = value.call(this, ...args);
-            return ret;
-          };
-        }
-      }
-      
-      class TestClass {
-        @logged
-        add(a, b) {
-          return a + b;
-        }
-      }
-      
-      const instance = new TestClass();
-      const result = instance.add(2, 3);
-      console.log('Result:', result, '| Calls:', calls);
-    `
-  },
-  {
-    name: 'Field Decorator',
-    code: `
-      const initializations = [];
-      
-      function logged(value, { kind, name }) {
-        if (kind === "field") {
-          return function (initialValue) {
-            initializations.push({ name, value: initialValue });
-            return initialValue;
-          };
-        }
-      }
-      
-      class TestClass {
-        @logged x = 10;
-      }
-      
-      const instance = new TestClass();
-      console.log('Field value:', instance.x, '| Initializations:', initializations);
-    `
-  },
-  {
-    name: 'Class Decorator',
-    code: `
-      const instances = [];
-      
-      function logged(value, { kind }) {
-        if (kind === "class") {
-          return class extends value {
-            constructor(...args) {
-              super(...args);
-              instances.push(this);
-            }
-          };
-        }
-      }
-      
-      @logged
-      class TestClass {
-        constructor(name) {
-          this.name = name;
-        }
-      }
-      
-      const instance1 = new TestClass('test1');
-      const instance2 = new TestClass('test2');
-      console.log('Instances:', instances.length, '| Names:', [instance1.name, instance2.name]);
-    `
-  },
-  {
-    name: 'Bound Method (addInitializer)',
-    code: `
-      function bound(value, { name, addInitializer }) {
-        addInitializer(function () {
-          this[name] = this[name].bind(this);
-        });
-      }
-      
-      class TestClass {
-        value = 42;
-        
-        @bound
-        getValue() {
-          return this.value;
-        }
-      }
-      
-      const instance = new TestClass();
-      const getValue = instance.getValue;
-      const result = getValue(); // Should work even without 'this' context
-      console.log('Result:', result);
-    `
-  }
-];
-
-async function runTests() {
-  const plugin = viteOxcDecoratorStage3();
-  await plugin.buildStart.call({});
+const code = `
+// Decorator that logs when addInitializer is called
+function logInit(value, context) {
+  console.log('Decorator called for:', context.name, 'kind:', context.kind);
   
-  console.log('Running runtime tests...\n');
+  context.addInitializer(function() {
+    console.log('Initializer called for:', context.name);
+  });
   
-  for (const testCase of testCases) {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`Test: ${testCase.name}`);
-    console.log('='.repeat(60));
-    
-    try {
-      const result = await plugin.transform(testCase.code, 'test.ts');
-      if (!result || typeof result !== 'object' || !('code' in result)) {
-        throw new Error('Transformation failed');
-      }
-      
-      // Save transformed code to a file
-      const filename = join(tmpdir(), `test-${testCase.name.replace(/\s+/g, '-').toLowerCase()}.mjs`);
-      writeFileSync(filename, result.code);
-      
-      console.log(`Transformed code saved to: ${filename}`);
-      console.log('\nExecuting transformed code:');
-      console.log('-'.repeat(60));
-      
-      // Execute the transformed code
-      const module = await import(filename + '?t=' + Date.now());
-      
-      console.log('-'.repeat(60));
-      console.log('✓ Test passed!\n');
-    } catch (error) {
-      console.error(`✗ Test failed:`, error.message);
-    }
+  if (context.kind === 'method') {
+    return function(...args) {
+      console.log('Method', context.name, 'called with:', args);
+      return value.apply(this, args);
+    };
   }
   
-  console.log('\n' + '='.repeat(60));
-  console.log('All tests completed!');
-  console.log('='.repeat(60));
+  if (context.kind === 'field') {
+    return function(initialValue) {
+      console.log('Field', context.name, 'initialized with:', initialValue);
+      return initialValue;
+    };
+  }
+  
+  return value;
 }
 
-runTests().catch(console.error);
+class TestClass {
+  @logInit
+  field = 42;
+  
+  @logInit
+  method(x) {
+    return x * 2;
+  }
+}
+
+console.log('Creating instance...');
+const instance = new TestClass();
+console.log('Field value:', instance.field);
+console.log('Calling method...');
+const result = instance.method(5);
+console.log('Method result:', result);
+`;
+
+console.log('Transforming code...\n');
+const result = transform('test.js', code, '{}');
+
+console.log('Result:', result);
+
+if (result && typeof result === 'object' && 'tag' in result && result.tag === 'err') {
+  console.error('Transformation error:', result.val);
+  process.exit(1);
+}
+
+const transformedCode = result.code;
+console.log('=== Transformed code ===\n');
+// Show just the class part
+const classStart = transformedCode.indexOf('class TestClass');
+const classEnd = transformedCode.indexOf('\n\nconsole.log');
+if (classStart !== -1 && classEnd !== -1) {
+  console.log(transformedCode.substring(classStart, classEnd));
+}
+console.log('\n=== Running transformed code ===\n');
+
+// Execute the transformed code
+try {
+  eval(transformedCode);
+} catch (err) {
+  console.error('Runtime error:', err.message);
+  console.error(err.stack);
+}
