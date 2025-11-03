@@ -10,6 +10,7 @@
 - `src/lib.rs` - Main entry point with transform function
 - `src/transformer.rs` - Decorator transformer using oxc Traverse trait
 - `src/codegen.rs` - Code generation utilities and helper functions
+- `src/helpers.js` - TC39 Stage 3 runtime helper functions (de-minified, readable)
 - `wit/world.wit` - WebAssembly Component Model interface definition
 - `Cargo.toml` - Dependencies configuration
 
@@ -70,12 +71,18 @@ The transformer now **detects** decorators, **injects helpers**, and **generates
    - Initializer variable declarations ([_initProto, _initClass])
    - Proper descriptor arrays with decorator references
 
-2. **Helper Function Injection**: Runtime helper functions are injected:
+2. **Helper Function Injection**: Runtime helper functions (from `src/helpers.js`) are injected:
    - `_applyDecs()` - Applies decorators in correct order ✅
    - `_toPropertyKey()` - Property key conversion ✅
    - `_toPrimitive()` - Primitive conversion ✅
    - `_setFunctionName()` - Function name setting ✅
    - `_checkInRHS()` - RHS validation ✅
+   
+   The helpers are maintained in a separate, readable JavaScript file (`src/helpers.js`) with:
+   - Descriptive variable names (e.g., `targetClass`, `memberDecorators`)
+   - Comprehensive JSDoc comments
+   - Proper code formatting for maintainability
+   - Embedded at compile-time using Rust's `include_str!` macro
 
 3. **Code Generation**: Successfully transforming:
    ```javascript
