@@ -1,7 +1,18 @@
 /**
  * Runtime Test Example
  * 
- * This file demonstrates that the transformed decorator code runs correctly in Node.js.
+ * This file demonstrates the Rust/WASM decorator transformer in action.
+ * 
+ * Current Status:
+ * - ✅ Code transforms successfully (decorators removed, static blocks added, helpers injected)
+ * - ✅ Variable declarations (_initProto, _initClass) are correctly generated
+ * - ✅ Transformed code executes without syntax errors
+ * - ⚠️  Decorator runtime behavior is incomplete (helper function implementation needs work)
+ * 
+ * Note: The TC39 Stage 3 decorator helper functions are complex and this AI-generated
+ * implementation is not yet fully compliant with the specification. The transformation
+ * itself is correct, but the runtime behavior of decorators is not yet working as expected.
+ * 
  * Run with: node test/runtime-example.mjs
  */
 
