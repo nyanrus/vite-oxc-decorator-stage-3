@@ -336,6 +336,32 @@ describe('Stage 3 Decorator Transformation', () => {
       expect(output).toBeTruthy();
       expect(output).toContain('function noraComponent');
       expect(output).toContain('class BrowserShareMode');
+      // Verify the decorator call expression is transformed
+      expect(output).toContain('noraComponent(import.meta.hot)');
+      // Verify _applyDecs is called
+      expect(output).toContain('_applyDecs');
+    });
+
+    it('should handle decorator factory pattern', async () => {
+      const input = `
+        function customElement(name) {
+          return (value, { addInitializer }) => {
+            addInitializer(function() {
+              console.log('Registering', name);
+            });
+          };
+        }
+
+        @customElement('my-component')
+        class MyComponent {}
+      `;
+
+      const output = await transformCode(input);
+      expect(output).toBeTruthy();
+      expect(output).toContain('function customElement');
+      expect(output).toContain('class MyComponent');
+      // Verify the decorator call expression is transformed
+      expect(output).toContain("customElement('my-component')");
     });
   });
 });
