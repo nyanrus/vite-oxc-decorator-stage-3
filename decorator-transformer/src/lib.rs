@@ -102,16 +102,20 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 
 fn inject_static_blocks(code: &mut String, transformations: &[transformer::ClassTransformation]) {
     for transformation in transformations {
-        let class_pattern = format!("class {} {{", transformation.class_name);
-        let position = code.find(&class_pattern)
-            .map(|pos| pos + class_pattern.len())
-            .or_else(|| {
-                if transformation.class_name == "AnonymousClass" {
-                    code.find("class {").map(|pos| pos + "class {".len())
-                } else {
-                    None
-                }
-            });
+        // Search for "class ClassName" followed eventually by "{"
+        // This handles: class C {, class C extends X {, etc.
+        let class_name_pattern = format!("class {}", transformation.class_name);
+        
+        let position = if let Some(class_pos) = code.find(&class_name_pattern) {
+            // Find the opening brace after the class name
+            let search_start = class_pos + class_name_pattern.len();
+            code[search_start..].find('{')
+                .map(|brace_offset| search_start + brace_offset + 1)
+        } else if transformation.class_name == "AnonymousClass" {
+            code.find("class {").map(|pos| pos + "class {".len())
+        } else {
+            None
+        };
         
         if let Some(injection_point) = position {
             let before = &code[..injection_point];
@@ -674,15 +678,65 @@ export default class BrowserShareMode {
         
         assert!(result.is_ok());
         if let Ok(res) = result {
-            println!("\n=== INPUT ===\n{}\n=== OUTPUT ===\n{}\n=== END ===", code, res.code);
-            println!("Transformations: {:?}", res.code);
-            // The decorator should be removed
-            // assert!(!res.code.contains("@noraComponent"));
+            // The decorator should be removed from class declaration
+            assert!(!res.code.contains("@noraComponent"));
             // Export default should remain valid
-            // assert!(res.code.contains("export default"));
+            assert!(res.code.contains("export default"));
             // Should not have invalid syntax like "export default @decorator"
-            // assert!(!res.code.contains("export default @"));
-            // assert_eq!(res.errors.len(), 0);
+            assert!(!res.code.contains("export default @"));
+            // Should have helper functions
+            assert!(res.code.contains("function _applyDecs"));
+            // Should have static block with decorator call
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("noraComponent"));
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_export_default_class_decorator_with_call() {
+        // Test the exact scenario from the issue
+        let code = r###"
+import { noraComponent, NoraComponentBase } from "#features-chrome/utils/base.ts";
+
+@noraComponent(import.meta.hot)
+export default class BrowserShareMode extends NoraComponentBase {
+    init() {
+        this.logger.info("Hello from Logger!");
+    }
+
+    _metadata() {
+        return {
+            moduleName: "browser-share-mode",
+            dependencies: [],
+            softDependencies: [],
+        };
+    }
+}
+"###;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== OUTPUT ===\n{}\n=== END ===", res.code);
+            // The decorator should be removed from class declaration
+            assert!(!res.code.contains("@noraComponent"));
+            // Export default should remain valid
+            assert!(res.code.contains("export default"));
+            assert!(res.code.contains("class BrowserShareMode"));
+            // Should not have invalid syntax like "export default @decorator"
+            assert!(!res.code.contains("export default @"));
+            // Should have helper functions
+            assert!(res.code.contains("function _applyDecs"));
+            // Should have static block with decorator call
+            assert!(res.code.contains("static {"));
+            assert!(res.code.contains("noraComponent"));
+            assert_eq!(res.errors.len(), 0);
         }
     }
 }
