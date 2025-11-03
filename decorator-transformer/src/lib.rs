@@ -825,3 +825,77 @@ export default class BrowserShareMode extends NoraComponentBase {
         }
     }
 }
+
+#[cfg(test)]
+mod comprehensive_decorator_tests {
+    use crate::transform;
+
+    #[test]
+    fn test_various_decorator_call_patterns() {
+        let code = r#"
+// Test 1: Simple identifier decorator
+@simple
+class Class1 {}
+
+// Test 2: Call expression with single argument
+@decorator(arg)
+class Class2 {}
+
+// Test 3: Call expression with multiple arguments
+@decorator(arg1, arg2, arg3)
+class Class3 {}
+
+// Test 4: Call expression with complex expression
+@decorator(import.meta.hot)
+class Class4 {}
+
+// Test 5: Chained member expression
+@namespace.decorator
+class Class5 {}
+
+// Test 6: Chained member expression with call
+@namespace.decorator(arg)
+class Class6 {}
+
+// Test 7: Method with call decorator
+class Class7 {
+    @bound(this)
+    method() {}
+}
+
+// Test 8: Field with call decorator
+class Class8 {
+    @validate("string")
+    field = "";
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Verify all decorator patterns are preserved
+            assert!(res.code.contains("simple"), "Simple decorator should be preserved");
+            assert!(res.code.contains("decorator(arg)"), "Single argument call should be preserved");
+            assert!(res.code.contains("decorator(arg1, arg2, arg3)"), "Multiple arguments call should be preserved");
+            assert!(res.code.contains("decorator(import.meta.hot)"), "Complex expression call should be preserved");
+            assert!(res.code.contains("namespace.decorator"), "Member expression should be preserved");
+            assert!(res.code.contains("namespace.decorator(arg)"), "Member expression call should be preserved");
+            assert!(res.code.contains("bound(this)"), "Method decorator call should be preserved");
+            assert!(res.code.contains("validate(\"string\")"), "Field decorator call should be preserved");
+            
+            // Verify decorator syntax is removed
+            assert!(!res.code.contains("@simple"), "@ syntax should be removed");
+            assert!(!res.code.contains("@decorator"), "@ syntax should be removed");
+            assert!(!res.code.contains("@namespace"), "@ syntax should be removed");
+            assert!(!res.code.contains("@bound"), "@ syntax should be removed");
+            assert!(!res.code.contains("@validate"), "@ syntax should be removed");
+            
+            assert_eq!(res.errors.len(), 0, "Should have no errors");
+        }
+    }
+}
