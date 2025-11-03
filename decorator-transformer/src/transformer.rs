@@ -1,6 +1,7 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_traverse::{Traverse, TraverseCtx};
+use oxc_codegen::Codegen;
 use std::cell::RefCell;
 
 /// Represents the kind of decorator according to TC39 Stage 3 decorator specification
@@ -114,19 +115,26 @@ impl<'a> DecoratorTransformer<'a> {
         }).collect()
     }
     
+    /// Generates source code for a decorator expression.
+    /// Returns the full expression including any call arguments.
+    /// For example: `noraComponent(import.meta.hot)` instead of just `noraComponent`
+    fn generate_expression_code(&self, expr: &Expression<'a>) -> String {
+        let mut codegen = Codegen::new();
+        codegen.print_expression(expr);
+        let code = codegen.into_source_text();
+        
+        // Fallback to "decorator" if code generation produces empty string
+        // This should not happen with valid AST, but provides a safe default
+        if code.is_empty() {
+            "decorator".to_string()
+        } else {
+            code
+        }
+    }
+    
     fn extract_decorator_names(&self, decorators: &oxc_allocator::Vec<'a, Decorator<'a>>) -> Vec<String> {
         decorators.iter().map(|dec| {
-            match &dec.expression {
-                Expression::Identifier(ident) => ident.name.to_string(),
-                Expression::CallExpression(call) => {
-                    if let Expression::Identifier(ident) = &call.callee {
-                        ident.name.to_string()
-                    } else {
-                        "decorator".to_string()
-                    }
-                }
-                _ => "decorator".to_string(),
-            }
+            self.generate_expression_code(&dec.expression)
         }).collect()
     }
     
@@ -183,17 +191,7 @@ impl<'a> DecoratorTransformer<'a> {
     
     fn collect_class_decorators(&self, class: &Class<'a>) -> Vec<String> {
         class.decorators.iter().map(|dec| {
-            match &dec.expression {
-                Expression::Identifier(ident) => ident.name.to_string(),
-                Expression::CallExpression(call) => {
-                    if let Expression::Identifier(ident) = &call.callee {
-                        ident.name.to_string()
-                    } else {
-                        "decorator".to_string()
-                    }
-                }
-                _ => "decorator".to_string(),
-            }
+            self.generate_expression_code(&dec.expression)
         }).collect()
     }
     
