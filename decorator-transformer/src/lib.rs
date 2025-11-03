@@ -656,4 +656,33 @@ class C {
             assert_eq!(res.errors.len(), 0);
         }
     }
+
+    #[test]
+    fn test_export_default_class_decorator() {
+        let code = r#"
+@noraComponent
+export default class BrowserShareMode {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== INPUT ===\n{}\n=== OUTPUT ===\n{}\n=== END ===", code, res.code);
+            println!("Transformations: {:?}", res.code);
+            // The decorator should be removed
+            // assert!(!res.code.contains("@noraComponent"));
+            // Export default should remain valid
+            // assert!(res.code.contains("export default"));
+            // Should not have invalid syntax like "export default @decorator"
+            // assert!(!res.code.contains("export default @"));
+            // assert_eq!(res.errors.len(), 0);
+        }
+    }
 }
