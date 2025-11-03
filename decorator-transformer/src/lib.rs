@@ -100,16 +100,20 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
     })
 }
 
-/// Find the start of a statement by looking backwards from class_pos
+/// Find the start of a statement by analyzing the text before the class keyword
 /// This handles cases like:
 /// - `class C {}` -> returns position of 'c' in class
 /// - `export class C {}` -> returns position of 'e' in export
 /// - `export default class C {}` -> returns position of 'e' in export
+///
+/// # Arguments
+/// * `before_class` - The text content before the 'class' keyword
+/// * `class_pos` - The absolute position where 'class' keyword starts
 fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
-    // Look backwards from class_pos to find the start of the line or statement
-    // We need to check if there's "export" or "export default" before "class"
+    // Search within before_class to find the start of the line
+    // and check if there's "export" or "export default" before "class"
     
-    // Find the start of the current line or statement
+    // Find the start of the current line
     let line_start = before_class.rfind('\n')
         .map(|pos| pos + 1)
         .unwrap_or(0);
