@@ -106,20 +106,34 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
         // This handles: class C {, class C extends X {, etc.
         let class_name_pattern = format!("class {}", transformation.class_name);
         
-        let position = if let Some(class_pos) = code.find(&class_name_pattern) {
+        let (class_start_pos, injection_point) = if let Some(class_pos) = code.find(&class_name_pattern) {
             // Find the opening brace after the class name
             let search_start = class_pos + class_name_pattern.len();
-            code[search_start..].find('{')
-                .map(|brace_offset| search_start + brace_offset + 1)
+            let brace_offset = code[search_start..].find('{')
+                .map(|brace_offset| search_start + brace_offset + 1);
+            (Some(class_pos), brace_offset)
         } else if transformation.class_name == "AnonymousClass" {
-            code.find("class {").map(|pos| pos + "class {".len())
+            let anon_class_pos = code.find("class {");
+            (anon_class_pos, anon_class_pos.map(|pos| pos + "class {".len()))
         } else {
-            None
+            (None, None)
         };
         
-        if let Some(injection_point) = position {
-            let before = &code[..injection_point];
-            let after = &code[injection_point..];
+        if let (Some(class_pos), Some(injection_point)) = (class_start_pos, injection_point) {
+            // Inject variable declarations before the class
+            let before_class = &code[..class_pos];
+            let after_class_start = &code[class_pos..];
+            
+            // Insert var declarations before the class
+            let var_decl = "var _initProto, _initClass;\n";
+            *code = format!("{}{}{}", before_class, var_decl, after_class_start);
+            
+            // Adjust injection point by the length of the var declaration we just added
+            let adjusted_injection_point = injection_point + var_decl.len();
+            
+            // Now inject the static block
+            let before = &code[..adjusted_injection_point];
+            let after = &code[adjusted_injection_point..];
             *code = format!("{}\n  {}{}", before, transformation.static_block_code, after);
         }
     }
