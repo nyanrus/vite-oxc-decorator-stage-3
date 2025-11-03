@@ -723,7 +723,6 @@ export default class BrowserShareMode extends NoraComponentBase {
         
         assert!(result.is_ok());
         if let Ok(res) = result {
-            println!("\n=== OUTPUT ===\n{}\n=== END ===", res.code);
             // The decorator should be removed from class declaration
             assert!(!res.code.contains("@noraComponent"));
             // Export default should remain valid

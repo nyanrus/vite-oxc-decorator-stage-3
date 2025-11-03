@@ -43,18 +43,20 @@ impl<'a> DecoratorTransformer<'a> {
     }
     
     pub fn check_for_decorators(&self, program: &Program<'a>) -> bool {
-        program.body.iter().any(|stmt| {
-            match stmt {
-                Statement::ClassDeclaration(class_decl) => self.has_decorators(&class_decl),
-                Statement::ExportDefaultDeclaration(export) => {
-                    matches!(&export.declaration, ExportDefaultDeclarationKind::ClassDeclaration(class) if self.has_decorators(class))
-                }
-                Statement::ExportNamedDeclaration(export) => {
-                    matches!(&export.declaration, Some(Declaration::ClassDeclaration(class)) if self.has_decorators(&class))
-                }
-                _ => false,
+        program.body.iter().any(|stmt| self.statement_has_decorators(stmt))
+    }
+    
+    fn statement_has_decorators(&self, stmt: &Statement<'a>) -> bool {
+        match stmt {
+            Statement::ClassDeclaration(class) => self.has_decorators(class),
+            Statement::ExportDefaultDeclaration(export) => {
+                matches!(&export.declaration, ExportDefaultDeclarationKind::ClassDeclaration(class) if self.has_decorators(class))
             }
-        })
+            Statement::ExportNamedDeclaration(export) => {
+                matches!(&export.declaration, Some(Declaration::ClassDeclaration(class)) if self.has_decorators(class))
+            }
+            _ => false,
+        }
     }
     
     pub fn needs_helpers(&self) -> bool {
