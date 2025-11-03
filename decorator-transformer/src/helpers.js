@@ -75,10 +75,10 @@ function _applyDecs(
    * @param {boolean} isOptional - Whether undefined is allowed
    */
   function assertCallable(value, description, verb, isOptional) {
-    if (typeof value !== "function" && (!isOptional || value !== undefined)) {
+    if (typeof value !== "function" && (isOptional || value !== undefined)) {
       throw new TypeError(
         description + " must " + (verb || "be") + " a function" +
-        (!isOptional ? " or undefined" : "")
+        (isOptional ? "" : " or undefined")
       );
     }
     return value;
@@ -362,7 +362,7 @@ function _applyDecs(
       var kind = flags & 7; // Extract kind bits
       
       // Check if this decorator matches the current pass
-      if ((flags & 8) == isStatic && (!kind) == isPrivate) {
+      if ((flags & 8) == isStatic && (!kind) === isPrivate) {
         var memberName = decoratorInfo[2];
         var isPrivateMember = !!decoratorInfo[3];
         var hasPairedDecorator = flags & 16;
