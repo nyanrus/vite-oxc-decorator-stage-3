@@ -137,8 +137,11 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
             *code = format!("{}\n  {}{}", before, transformation.static_block_code, after);
             
             // If we need instance initialization, inject constructor code
+            // Note: We add formatting offset (newline + indentation) to class_body_start
+            // to account for the static block and formatting that was just injected
+            let formatting_offset = 3; // "\n  " = newline + 2-space indent
             if transformation.needs_instance_init {
-                inject_constructor_init(code, &transformation.class_name, adjusted_injection_point + transformation.static_block_code.len() + 3);
+                inject_constructor_init(code, &transformation.class_name, adjusted_injection_point + transformation.static_block_code.len() + formatting_offset);
             }
         }
     }
@@ -162,10 +165,23 @@ fn inject_constructor_init(code: &mut String, _class_name: &str, class_body_star
         // Look for super() call
         let ctor_body = &code[ctor_body_start..];
         if let Some(super_pos) = ctor_body.find("super(") {
-            // Find the end of the super() call (semicolon or newline)
+            // Find the end of the super() call - look for semicolon or closing paren followed by newline/space
             let super_start = ctor_body_start + super_pos;
-            if let Some(semi_pos) = code[super_start..].find(';') {
-                let injection_point = super_start + semi_pos + 1;
+            let search_from = super_start + "super(".len();
+            
+            // Find the matching closing paren (simple approach - look for first ')')
+            if let Some(paren_pos) = code[search_from..].find(')') {
+                let call_end = search_from + paren_pos + 1;
+                
+                // Find the statement end (semicolon or newline)
+                let remaining = &code[call_end..];
+                let injection_point = if let Some(semi_pos) = remaining.find(';') {
+                    call_end + semi_pos + 1
+                } else {
+                    // No semicolon - inject right after the closing paren
+                    call_end
+                };
+                
                 let before = &code[..injection_point];
                 let after = &code[injection_point..];
                 *code = format!("{}\n    if (_initProto) _initProto(this);{}", before, after);
