@@ -115,10 +115,21 @@ impl<'a> DecoratorTransformer<'a> {
         }).collect()
     }
     
+    /// Generates source code for a decorator expression.
+    /// Returns the full expression including any call arguments.
+    /// For example: `noraComponent(import.meta.hot)` instead of just `noraComponent`
     fn generate_expression_code(&self, expr: &Expression<'a>) -> String {
         let mut codegen = Codegen::new();
         codegen.print_expression(expr);
-        codegen.into_source_text()
+        let code = codegen.into_source_text();
+        
+        // Fallback to "decorator" if code generation produces empty string
+        // This should not happen with valid AST, but provides a safe default
+        if code.is_empty() {
+            "decorator".to_string()
+        } else {
+            code
+        }
     }
     
     fn extract_decorator_names(&self, decorators: &oxc_allocator::Vec<'a, Decorator<'a>>) -> Vec<String> {
