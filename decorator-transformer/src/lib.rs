@@ -100,6 +100,49 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
     })
 }
 
+/// Find the absolute position where variable declarations should be injected
+/// by analyzing the text before the class keyword.
+///
+/// This function is designed to work with oxc-generated code output, which is
+/// well-formed and doesn't contain comments or strings in unexpected positions.
+///
+/// This handles cases like:
+/// - `class C {}` -> returns position before 'class'
+/// - `export class C {}` -> returns position before 'export'
+/// - `export default class C {}` -> returns position before 'export'
+///
+/// # Arguments
+/// * `before_class` - The text content before the 'class' keyword
+/// * `class_pos` - The absolute position where 'class' keyword starts (must be valid)
+///
+/// # Returns
+/// The absolute position where variable declarations should be injected
+fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
+    // Find the start of the current line in before_class
+    let line_start = before_class.rfind('\n')
+        .map(|pos| pos + 1)
+        .unwrap_or(0);
+    
+    // Get the content from line start to where we found 'class'
+    let line_content = &before_class[line_start..];
+    
+    // Check if this line contains "export" keyword before where class would be
+    // This handles both "export class" and "export default class"
+    let trimmed = line_content.trim_start();
+    if trimmed.starts_with("export") {
+        // Find the actual position of "export" keyword (handles leading whitespace)
+        // Since trimmed (which is line_content without leading whitespace) starts with "export",
+        // we know "export" must exist in line_content
+        let export_offset = line_content.find("export")
+            .expect("export keyword must exist since trimmed starts with it");
+        line_start + export_offset
+    } else {
+        // No export on this line, inject right before "class"
+        // (class_pos is already an absolute position provided by the caller)
+        class_pos
+    }
+}
+
 fn inject_static_blocks(code: &mut String, transformations: &[transformer::ClassTransformation]) {
     for transformation in transformations {
         // Search for "class ClassName" followed eventually by "{"
@@ -120,13 +163,18 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
         };
         
         if let (Some(class_pos), Some(injection_point)) = (class_start_pos, class_body_start) {
-            // Inject variable declarations before the class
+            // Find the actual start of the statement (could have 'export default' or 'export')
+            // Look backwards from class_pos to find where the statement begins
             let before_class = &code[..class_pos];
-            let after_class_start = &code[class_pos..];
             
-            // Insert var declarations before the class
-            let var_decl = "var _initProto, _initClass;\n";
-            *code = format!("{}{}{}", before_class, var_decl, after_class_start);
+            let var_injection_pos = find_statement_start(before_class, class_pos);
+            
+            let before_injection = &code[..var_injection_pos];
+            let after_injection = &code[var_injection_pos..];
+            
+            // Use 'let' instead of 'var' for ESNext compatibility
+            let var_decl = "let _initProto, _initClass;\n";
+            *code = format!("{}{}{}", before_injection, var_decl, after_injection);
             
             // Adjust injection point by the length of the var declaration we just added
             let adjusted_injection_point = injection_point + var_decl.len();
@@ -1097,6 +1145,202 @@ class C extends Base {
             let super_pos = res.code.find("super(42);").unwrap();
             let init_pos = res.code.find("_initProto(this)").unwrap();
             assert!(init_pos > super_pos, "_initProto should be after super()");
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_output_debug {
+    use crate::transform;
+
+    #[test]
+    #[ignore]
+    fn show_export_default_output() {
+        let code = r#"
+@logged
+export default class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        if let Ok(res) = result {
+            println!("\n=== GENERATED CODE ===");
+            println!("{}", res.code);
+            println!("=== END ===\n");
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_export_variations {
+    use crate::transform;
+
+    #[test]
+    #[ignore]
+    fn test_export_class_output() {
+        let code = r#"
+@logged
+export class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        if let Ok(res) = result {
+            println!("\n=== EXPORT CLASS OUTPUT ===");
+            println!("{}", res.code);
+            println!("=== END ===\n");
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_export_fix {
+    use crate::transform;
+
+    #[test]
+    fn test_export_default_class_no_invalid_syntax() {
+        let code = r#"
+@logged
+export default class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Should NOT have "export default var" - this was the bug
+            assert!(!res.code.contains("export default var"), 
+                "Bug: Found 'export default var' which is invalid syntax");
+            assert!(!res.code.contains("export default let"), 
+                "Bug: Found 'export default let' which is invalid syntax");
+            
+            // Should have correct syntax: let declaration before export
+            assert!(res.code.contains("let _initProto, _initClass;"), 
+                "Should use 'let' for variable declaration");
+            assert!(res.code.contains("export default class MyClass"), 
+                "Should have export default class");
+            
+            // Verify the order: let comes before export
+            let let_pos = res.code.find("let _initProto").expect("Should find let declaration");
+            let export_pos = res.code.find("export default").expect("Should find export default");
+            assert!(let_pos < export_pos, 
+                "Variable declaration should come before export statement");
+        }
+    }
+
+    #[test]
+    fn test_export_named_class_no_invalid_syntax() {
+        let code = r#"
+@logged
+export class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Should NOT have "export var" or "export let"
+            assert!(!res.code.contains("export var"), 
+                "Bug: Found 'export var' which is invalid syntax");
+            assert!(!res.code.contains("export let"), 
+                "Bug: Found 'export let' - variable should come before export");
+            
+            // Should have correct syntax
+            assert!(res.code.contains("let _initProto, _initClass;"), 
+                "Should use 'let' for variable declaration");
+            assert!(res.code.contains("export class MyClass"), 
+                "Should have export class");
+            
+            // Verify the order
+            let let_pos = res.code.find("let _initProto").expect("Should find let declaration");
+            let export_pos = res.code.find("export class").expect("Should find export class");
+            assert!(let_pos < export_pos, 
+                "Variable declaration should come before export statement");
+        }
+    }
+
+    #[test]
+    fn test_regular_class_uses_let() {
+        let code = r#"
+@logged
+class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Should use 'let' not 'var' for ESNext
+            assert!(res.code.contains("let _initProto, _initClass;"), 
+                "Should use 'let' for ESNext compatibility");
+            assert!(!res.code.contains("var _initProto"), 
+                "Should not use 'var' - use 'let' for ESNext");
+        }
+    }
+
+    #[test]
+    fn test_helpers_use_const_let_not_var() {
+        let code = r#"
+@logged
+class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Helper functions should use const/let, not var
+            // Check for the helper function _applyDecs
+            assert!(res.code.contains("function _applyDecs"), 
+                "Should have helper functions");
+            
+            // The helpers should prefer const/let over var
+            // Count occurrences to verify modernization
+            let const_count = res.code.matches(" const ").count();
+            let let_count = res.code.matches(" let ").count();
+            let var_count = res.code.matches(" var ").count();
+            
+            // We should have converted most/all vars to const/let
+            assert!(const_count + let_count > 0, 
+                "Should use const/let in helpers");
+            assert_eq!(var_count, 0, 
+                "Should not use 'var' - all should be converted to const/let for ESNext");
         }
     }
 }

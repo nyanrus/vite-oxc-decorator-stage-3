@@ -29,20 +29,20 @@ function _applyDecs(
   parentClass,
   metadata
 ) {
-  var metadataSymbol = Symbol.metadata || Symbol.for("Symbol.metadata");
-  var defineProperty = Object.defineProperty;
-  var objectCreate = Object.create;
+  const metadataSymbol = Symbol.metadata || Symbol.for("Symbol.metadata");
+  const defineProperty = Object.defineProperty;
+  const objectCreate = Object.create;
   
   // Storage for checking duplicate decorator applications
-  var decoratorRegistry = [objectCreate(null), objectCreate(null)];
+  const decoratorRegistry = [objectCreate(null), objectCreate(null)];
   
-  var protoInitializers;
-  var staticInitializers;
-  var existingMetadata;
-  var appliedDecorators;
-  var instancePrivateAccessors;
-  var staticPrivateAccessors;
-  var metadataValue;
+  let protoInitializers;
+  let staticInitializers;
+  let existingMetadata;
+  let appliedDecorators;
+  let instancePrivateAccessors;
+  let staticPrivateAccessors;
+  let metadataValue;
   
   /**
    * Create a wrapper function that applies a list of initializers.
@@ -58,7 +58,7 @@ function _applyDecs(
         target = targetClass;
       }
       
-      for (var i = 0; i < initializers.length; i++) {
+      for (let i = 0; i < initializers.length; i++) {
         value = initializers[i].apply(target, returnsValue ? [value] : []);
       }
       
@@ -121,13 +121,13 @@ function _applyDecs(
       }
     }
     
-    var decorators = [].concat(decoratorDescriptor[0]);
-    var getter = decoratorDescriptor[3];
-    var isClassDecorator = !allInitializers;
-    var isAccessor = memberKind === 1;
-    var isGetter = memberKind === 3;
-    var isSetter = memberKind === 4;
-    var isMethod = memberKind === 2;
+    const decorators = [].concat(decoratorDescriptor[0]);
+    const getter = decoratorDescriptor[3];
+    const isClassDecorator = !allInitializers;
+    const isAccessor = memberKind === 1;
+    const isGetter = memberKind === 3;
+    const isSetter = memberKind === 4;
+    const isMethod = memberKind === 2;
     
     /**
      * Create a bound accessor function.
@@ -145,14 +145,14 @@ function _applyDecs(
       };
     }
     
-    var descriptor;
-    var accessorInitializers;
+    let descriptor;
+    let accessorInitializers;
     
     if (!isClassDecorator) {
       descriptor = {};
       accessorInitializers = [];
       
-      var descriptorKey = isGetter ? "get" : (isSetter || isAccessor ? "set" : "value");
+      const descriptorKey = isGetter ? "get" : (isSetter || isAccessor ? "set" : "value");
       
       if (isPrivate) {
         if (hasPrivateGetter || isAccessor) {
@@ -177,7 +177,7 @@ function _applyDecs(
       
       // Check for duplicate decorators
       if (!hasPrivateGetter && !isPrivate) {
-        var registryKey = decoratorRegistry[+isStatic][memberName];
+        const registryKey = decoratorRegistry[+isStatic][memberName];
         if (registryKey && (registryKey ^ memberKind) !== 7) {
           throw Error(
             "Decorating two elements with the same name (" +
@@ -189,15 +189,15 @@ function _applyDecs(
       }
     }
     
-    var decoratedValue = target;
+    let decoratedValue = target;
     
     // Apply decorators in reverse order
-    for (var i = decorators.length - 1; i >= 0; i -= hasPairedDecorator ? 2 : 1) {
-      var decorator = assertCallable(decorators[i], "A decorator", "be", true);
-      var pairedDecorator = hasPairedDecorator ? decorators[i - 1] : undefined;
-      var addInitializerCalled = {};
+    for (let i = decorators.length - 1; i >= 0; i -= hasPairedDecorator ? 2 : 1) {
+      const decorator = assertCallable(decorators[i], "A decorator", "be", true);
+      const pairedDecorator = hasPairedDecorator ? decorators[i - 1] : undefined;
+      const addInitializerCalled = {};
       
-      var context = {
+      const context = {
         kind: ["field", "accessor", "method", "getter", "setter", "class"][memberKind],
         name: memberName,
         metadata: metadataValue,
@@ -225,7 +225,7 @@ function _applyDecs(
         context.static = isStatic;
         context.private = isPrivate;
         
-        var access = context.access = {
+        const access = context.access = {
           has: isPrivate 
             ? privateAccessValidator.bind() 
             : function (obj) { return memberName in obj; }
@@ -263,13 +263,13 @@ function _applyDecs(
         if (isAccessor) {
           // Handle accessor decorator return value
           if (typeof decoratedValue === "object" && decoratedValue) {
-            var newGetter = assertCallable(decoratedValue.get, "accessor.get");
+            const newGetter = assertCallable(decoratedValue.get, "accessor.get");
             if (newGetter) descriptor.get = newGetter;
             
-            var newSetter = assertCallable(decoratedValue.set, "accessor.set");
+            const newSetter = assertCallable(decoratedValue.set, "accessor.set");
             if (newSetter) descriptor.set = newSetter;
             
-            var init = assertCallable(decoratedValue.init, "accessor.init");
+            const init = assertCallable(decoratedValue.init, "accessor.init");
             if (init) accessorInitializers.unshift(init);
           } else if (decoratedValue !== undefined) {
             throw new TypeError(
@@ -277,7 +277,7 @@ function _applyDecs(
             );
           }
         } else {
-          var decoratorReturnCheck = assertCallable(
+          const decoratorReturnCheck = assertCallable(
             decoratedValue,
             (hasPrivateGetter ? "field" : "method") + " decorators",
             "return"
@@ -346,7 +346,7 @@ function _applyDecs(
   
   appliedDecorators = [];
   
-  var addClassInitializer = function (initializer) {
+  const addClassInitializer = function (initializer) {
     if (initializer) {
       appliedDecorators.push(createInitializerWrapper(initializer));
     }
@@ -356,16 +356,16 @@ function _applyDecs(
    * Process decorators for a specific pass (static/instance, public/private).
    */
   function processDecorators(isStatic, isPrivate) {
-    for (var i = 0; i < memberDecorators.length; i++) {
-      var decoratorInfo = memberDecorators[i];
-      var flags = decoratorInfo[1];
-      var kind = flags & 7; // Extract kind bits
+    for (let i = 0; i < memberDecorators.length; i++) {
+      const decoratorInfo = memberDecorators[i];
+      const flags = decoratorInfo[1];
+      const kind = flags & 7; // Extract kind bits
       
       // Check if this decorator matches the current pass
       if ((flags & 8) == isStatic && (!kind) === isPrivate) {
-        var memberName = decoratorInfo[2];
-        var isPrivateMember = !!decoratorInfo[3];
-        var hasPairedDecorator = flags & 16;
+        const memberName = decoratorInfo[2];
+        const isPrivateMember = !!decoratorInfo[3];
+        const hasPairedDecorator = flags & 16;
         
         applyDecorator(
           isStatic ? targetClass : targetClass.prototype,
@@ -410,7 +410,7 @@ function _applyDecs(
   return {
     e: existingMetadata,
     get c() {
-      var classInitializers = [];
+      const classInitializers = [];
       if (classDecorators) {
         return [
           addMetadata(
@@ -437,7 +437,7 @@ function _applyDecs(
  * @returns {string|symbol} Property key
  */
 function _toPropertyKey(value) {
-  var primitive = _toPrimitive(value, "string");
+  const primitive = _toPrimitive(value, "string");
   return typeof primitive == "symbol" ? primitive : String(primitive);
 }
 
@@ -453,9 +453,9 @@ function _toPrimitive(value, hint) {
     return value;
   }
   
-  var toPrimitive = value[Symbol.toPrimitive];
+  const toPrimitive = value[Symbol.toPrimitive];
   if (toPrimitive !== undefined) {
-    var result = toPrimitive.call(value, hint || "default");
+    const result = toPrimitive.call(value, hint || "default");
     if (typeof result != "object") {
       return result;
     }
