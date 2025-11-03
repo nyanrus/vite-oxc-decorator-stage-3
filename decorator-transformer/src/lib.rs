@@ -100,6 +100,32 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
     })
 }
 
+/// Find the start of a statement by looking backwards from class_pos
+/// This handles cases like:
+/// - `class C {}` -> returns position of 'c' in class
+/// - `export class C {}` -> returns position of 'e' in export
+/// - `export default class C {}` -> returns position of 'e' in export
+fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
+    // Look backwards from class_pos to find the start of the line or statement
+    // We need to check if there's "export" or "export default" before "class"
+    
+    // Find the start of the current line or statement
+    let line_start = before_class.rfind('\n')
+        .map(|pos| pos + 1)
+        .unwrap_or(0);
+    
+    // Get the content from line start to class
+    let line_content = &before_class[line_start..];
+    
+    // Check if this line contains "export" before where class would be
+    if line_content.trim_start().starts_with("export") {
+        line_start
+    } else {
+        // No export, inject right before "class"
+        class_pos
+    }
+}
+
 fn inject_static_blocks(code: &mut String, transformations: &[transformer::ClassTransformation]) {
     for transformation in transformations {
         // Search for "class ClassName" followed eventually by "{"
@@ -120,13 +146,18 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
         };
         
         if let (Some(class_pos), Some(injection_point)) = (class_start_pos, class_body_start) {
-            // Inject variable declarations before the class
+            // Find the actual start of the statement (could have 'export default' or 'export')
+            // Look backwards from class_pos to find where the statement begins
             let before_class = &code[..class_pos];
-            let after_class_start = &code[class_pos..];
             
-            // Insert var declarations before the class
-            let var_decl = "var _initProto, _initClass;\n";
-            *code = format!("{}{}{}", before_class, var_decl, after_class_start);
+            let var_injection_pos = find_statement_start(before_class, class_pos);
+            
+            let before_injection = &code[..var_injection_pos];
+            let after_injection = &code[var_injection_pos..];
+            
+            // Use 'let' instead of 'var' for ESNext compatibility
+            let var_decl = "let _initProto, _initClass;\n";
+            *code = format!("{}{}{}", before_injection, var_decl, after_injection);
             
             // Adjust injection point by the length of the var declaration we just added
             let adjusted_injection_point = injection_point + var_decl.len();
@@ -1097,6 +1128,62 @@ class C extends Base {
             let super_pos = res.code.find("super(42);").unwrap();
             let init_pos = res.code.find("_initProto(this)").unwrap();
             assert!(init_pos > super_pos, "_initProto should be after super()");
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_output_debug {
+    use crate::transform;
+
+    #[test]
+    #[ignore]
+    fn show_export_default_output() {
+        let code = r#"
+@logged
+export default class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        if let Ok(res) = result {
+            println!("\n=== GENERATED CODE ===");
+            println!("{}", res.code);
+            println!("=== END ===\n");
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_export_variations {
+    use crate::transform;
+
+    #[test]
+    #[ignore]
+    fn test_export_class_output() {
+        let code = r#"
+@logged
+export class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        if let Ok(res) = result {
+            println!("\n=== EXPORT CLASS OUTPUT ===");
+            println!("{}", res.code);
+            println!("=== END ===\n");
         }
     }
 }
