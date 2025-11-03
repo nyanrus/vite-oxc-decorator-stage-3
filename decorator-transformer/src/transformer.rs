@@ -58,6 +58,7 @@ use std::cell::RefCell;
 /// Represents the kind of decorator according to TC39 Stage 3 decorator specification
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[allow(dead_code)]  // Class variant reserved for class decorators
 pub enum DecoratorKind {
     Field = 0,
     Accessor = 1,
@@ -80,6 +81,7 @@ pub struct TransformerState;
 #[derive(Debug, Clone)]
 pub struct ClassTransformation {
     pub class_name: String,
+    #[allow(dead_code)]  // Used for AST-based positioning (future improvement)
     pub class_span: Span,  // Store span instead of relying on string search
     pub static_block_code: String,
     pub needs_instance_init: bool,  // True if field/accessor decorators exist
@@ -378,6 +380,7 @@ struct DecoratorMetadata {
 /// AST-based decorator metadata that stores Expression references
 /// instead of generated code strings
 #[derive(Debug)]
+#[allow(dead_code)]  // Reserved for future full AST implementation
 struct DecoratorAstMetadata<'a> {
     decorator_expressions: Vec<&'a Expression<'a>>,  // Store AST nodes, not strings
     kind: DecoratorKind,

@@ -88,7 +88,7 @@ fn parse_options(options: &str) -> Result<TransformOptions, String> {
 }
 
 fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: Vec<String>) -> Result<TransformResult, String> {
-    let codegen_result = Codegen::new().build(&program);
+    let codegen_result = Codegen::new().build(program);
     Ok(TransformResult {
         code: codegen_result.code,
         map: if opts.source_maps {
