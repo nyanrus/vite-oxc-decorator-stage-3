@@ -1187,3 +1187,143 @@ export class MyClass {
         }
     }
 }
+
+#[cfg(test)]
+mod test_export_fix {
+    use crate::transform;
+
+    #[test]
+    fn test_export_default_class_no_invalid_syntax() {
+        let code = r#"
+@logged
+export default class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Should NOT have "export default var" - this was the bug
+            assert!(!res.code.contains("export default var"), 
+                "Bug: Found 'export default var' which is invalid syntax");
+            assert!(!res.code.contains("export default let"), 
+                "Bug: Found 'export default let' which is invalid syntax");
+            
+            // Should have correct syntax: let declaration before export
+            assert!(res.code.contains("let _initProto, _initClass;"), 
+                "Should use 'let' for variable declaration");
+            assert!(res.code.contains("export default class MyClass"), 
+                "Should have export default class");
+            
+            // Verify the order: let comes before export
+            let let_pos = res.code.find("let _initProto").expect("Should find let declaration");
+            let export_pos = res.code.find("export default").expect("Should find export default");
+            assert!(let_pos < export_pos, 
+                "Variable declaration should come before export statement");
+        }
+    }
+
+    #[test]
+    fn test_export_named_class_no_invalid_syntax() {
+        let code = r#"
+@logged
+export class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Should NOT have "export var" or "export let"
+            assert!(!res.code.contains("export var"), 
+                "Bug: Found 'export var' which is invalid syntax");
+            assert!(!res.code.contains("export let"), 
+                "Bug: Found 'export let' - variable should come before export");
+            
+            // Should have correct syntax
+            assert!(res.code.contains("let _initProto, _initClass;"), 
+                "Should use 'let' for variable declaration");
+            assert!(res.code.contains("export class MyClass"), 
+                "Should have export class");
+            
+            // Verify the order
+            let let_pos = res.code.find("let _initProto").expect("Should find let declaration");
+            let export_pos = res.code.find("export class").expect("Should find export class");
+            assert!(let_pos < export_pos, 
+                "Variable declaration should come before export statement");
+        }
+    }
+
+    #[test]
+    fn test_regular_class_uses_let() {
+        let code = r#"
+@logged
+class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Should use 'let' not 'var' for ESNext
+            assert!(res.code.contains("let _initProto, _initClass;"), 
+                "Should use 'let' for ESNext compatibility");
+            assert!(!res.code.contains("var _initProto"), 
+                "Should not use 'var' - use 'let' for ESNext");
+        }
+    }
+
+    #[test]
+    fn test_helpers_use_const_let_not_var() {
+        let code = r#"
+@logged
+class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            // Helper functions should use const/let, not var
+            // Check for the helper function _applyDecs
+            assert!(res.code.contains("function _applyDecs"), 
+                "Should have helper functions");
+            
+            // The helpers should prefer const/let over var
+            // Count occurrences to verify modernization
+            let const_count = res.code.matches(" const ").count();
+            let let_count = res.code.matches(" let ").count();
+            let var_count = res.code.matches(" var ").count();
+            
+            // We should have converted most/all vars to const/let
+            assert!(const_count + let_count > 0, 
+                "Should use const/let in helpers");
+            assert_eq!(var_count, 0, 
+                "Should not use 'var' - all should be converted to const/let for ESNext");
+        }
+    }
+}
