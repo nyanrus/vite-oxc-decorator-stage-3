@@ -100,20 +100,22 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
     })
 }
 
-/// Find the start of a statement by analyzing the text before the class keyword
+/// Find the absolute position where variable declarations should be injected
+/// by analyzing the text before the class keyword.
+///
 /// This handles cases like:
-/// - `class C {}` -> returns position of 'c' in class
-/// - `export class C {}` -> returns position of 'e' in export
-/// - `export default class C {}` -> returns position of 'e' in export
+/// - `class C {}` -> returns position before 'class'
+/// - `export class C {}` -> returns position before 'export'
+/// - `export default class C {}` -> returns position before 'export'
 ///
 /// # Arguments
 /// * `before_class` - The text content before the 'class' keyword
 /// * `class_pos` - The absolute position where 'class' keyword starts
+///
+/// # Returns
+/// The absolute position where variable declarations should be injected
 fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
-    // Search within before_class to find the start of the line
-    // and check if there's "export" or "export default" before "class"
-    
-    // Find the start of the current line
+    // Find the start of the current line in before_class
     let line_start = before_class.rfind('\n')
         .map(|pos| pos + 1)
         .unwrap_or(0);
@@ -125,15 +127,13 @@ fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
     // This handles both "export class" and "export default class"
     let trimmed = line_content.trim_start();
     if trimmed.starts_with("export") {
-        // Find the actual position of "export" keyword in the original string
-        // This handles cases with leading whitespace
-        if let Some(export_offset) = line_content.find("export") {
-            line_start + export_offset
-        } else {
-            line_start
-        }
+        // Find the actual position of "export" keyword (handles leading whitespace)
+        // We know this will succeed because trimmed.starts_with("export") is true
+        let export_offset = line_content.find("export").unwrap();
+        line_start + export_offset
     } else {
-        // No export, inject right before "class"
+        // No export on this line, inject right before "class"
+        // (class_pos is already an absolute position)
         class_pos
     }
 }
