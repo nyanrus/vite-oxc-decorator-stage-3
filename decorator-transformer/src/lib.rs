@@ -168,20 +168,20 @@ fn inject_constructor_init(code: &mut String, _class_name: &str, class_body_star
                 let injection_point = super_start + semi_pos + 1;
                 let before = &code[..injection_point];
                 let after = &code[injection_point..];
-                *code = format!("{}\n    _initProto(this);{}", before, after);
+                *code = format!("{}\n    if (_initProto) _initProto(this);{}", before, after);
             }
         } else {
             // No super() - inject at start of constructor body
             let before = &code[..ctor_body_start];
             let after = &code[ctor_body_start..];
-            *code = format!("{}\n    _initProto(this);{}", before, after);
+            *code = format!("{}\n    if (_initProto) _initProto(this);{}", before, after);
         }
     } else {
         // No constructor - create one
         // We need to inject right after the static block
         let before = &code[..class_body_start];
         let after = &code[class_body_start..];
-        *code = format!("{}\n  constructor() {{\n    _initProto(this);\n  }}{}", before, after);
+        *code = format!("{}\n  constructor() {{\n    if (_initProto) _initProto(this);\n  }}{}", before, after);
     }
 }
 

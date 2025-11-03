@@ -222,9 +222,9 @@ impl<'a> DecoratorTransformer<'a> {
         
         // Generate the appropriate static block based on whether there are class decorators
         if class_decorators.is_empty() {
-            // Only member decorators - use .e property and call _initClass
+            // Only member decorators - use .e property and call _initClass if defined
             format!(
-                "static {{ [_initProto, _initClass] = _applyDecs(this, {}, {}).e; _initClass(); }}",
+                "static {{ [_initProto, _initClass] = _applyDecs(this, {}, {}).e; if (_initClass) _initClass(); }}",
                 member_desc_array,
                 class_dec_array
             )
@@ -232,7 +232,7 @@ impl<'a> DecoratorTransformer<'a> {
             // Has class decorators - use .c property which may replace the class
             // The .c property returns [newClass, classInitializer]
             format!(
-                "static {{ let _classThis; [_classThis, _initClass] = _applyDecs(this, {}, {}).c; _initClass(); }}",
+                "static {{ let _classThis; [_classThis, _initClass] = _applyDecs(this, {}, {}).c; if (_initClass) _initClass(); }}",
                 member_desc_array,
                 class_dec_array
             )
