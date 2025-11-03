@@ -1,4 +1,7 @@
 import type { Plugin } from 'vite';
+import { transformAsync } from '@babel/core';
+// @ts-expect-error - Babel plugin types
+import decoratorsPlugin from '@babel/plugin-proposal-decorators';
 
 export interface ViteOxcDecoratorOptions {
   /**
@@ -26,27 +29,53 @@ interface WasmTransformer {
 }
 
 let wasmTransformer: WasmTransformer | null = null;
+let wasmAvailable: boolean | null = null;
 
 /**
- * Load the WASM transformer module (jco-generated)
+ * Try to load the WASM transformer module (jco-generated)
+ * Returns null if WASM is not available (not built yet)
  */
-async function loadWasmTransformer(): Promise<WasmTransformer> {
+async function tryLoadWasmTransformer(): Promise<WasmTransformer | null> {
+  if (wasmAvailable === false) {
+    return null;
+  }
+
   if (wasmTransformer) {
     return wasmTransformer;
   }
 
   try {
     // Load the jco-generated WASM Component
+    // @ts-expect-error - WASM module may not be built yet
     const wasm = await import('../pkg/decorator_transformer.js');
     wasmTransformer = wasm as unknown as WasmTransformer;
+    wasmAvailable = true;
     return wasmTransformer;
   } catch (e) {
-    throw new Error(
-      `Failed to load WASM transformer. ` +
-      `Please build the WASM module first: npm run build:wasm && npm run build:jco\n` +
-      `Error: ${e}`
-    );
+    // WASM not available, will use Babel fallback
+    wasmAvailable = false;
+    return null;
   }
+}
+
+/**
+ * Transform code using Babel (fallback transformer)
+ */
+async function transformWithBabel(code: string, id: string): Promise<{ code: string; map: any } | null> {
+  const result = await transformAsync(code, {
+    filename: id,
+    plugins: [[decoratorsPlugin, { version: '2023-11' }]],
+    sourceMaps: true,
+  });
+
+  if (!result || !result.code) {
+    return null;
+  }
+
+  return {
+    code: result.code,
+    map: result.map,
+  };
 }
 
 /**
@@ -85,7 +114,7 @@ export default function viteOxcDecoratorStage3(
     return includePatterns.some((pattern) => pattern.test(id));
   };
 
-  let wasmInit: Promise<WasmTransformer> | null = null;
+  let wasmInit: Promise<WasmTransformer | null> | null = null;
 
   return {
     name: 'vite-oxc-decorator-stage-3',
@@ -93,9 +122,9 @@ export default function viteOxcDecoratorStage3(
     enforce: 'pre', // Run before other plugins
 
     async buildStart() {
-      // Initialize WASM transformer
+      // Try to initialize WASM transformer
       if (!wasmInit) {
-        wasmInit = loadWasmTransformer();
+        wasmInit = tryLoadWasmTransformer();
       }
     },
 
@@ -109,41 +138,52 @@ export default function viteOxcDecoratorStage3(
         return null;
       }
 
-      // Load WASM transformer
+      // Try to load WASM transformer first
       const wasm = await wasmInit;
-      if (!wasm) {
-        throw new Error('WASM transformer not initialized');
-      }
-
-      try {
-        // Call Component Model transform function
-        const options = JSON.stringify({ source_maps: true });
-        const result = wasm.transform(id, code, options);
-        
-        // Check if result is an error (Component Model Result type)
-        if (typeof result === 'object' && 'tag' in result && result.tag === 'err') {
-          throw new Error(`WASM transformer error in ${id}: ${result.val}`);
+      
+      if (wasm) {
+        // Use WASM transformer if available
+        try {
+          // Call Component Model transform function
+          const options = JSON.stringify({ source_maps: true });
+          const result = wasm.transform(id, code, options);
+          
+          // Check if result is an error (Component Model Result type)
+          if (typeof result === 'object' && 'tag' in result && result.tag === 'err') {
+            throw new Error(`WASM transformer error in ${id}: ${result.val}`);
+          }
+          
+          const transformResult = result as TransformResult;
+          
+          // Check for transformation errors
+          if (transformResult.errors.length > 0) {
+            throw new Error(
+              `WASM transformer errors in ${id}:\n${transformResult.errors.join('\n')}`
+            );
+          }
+          
+          return {
+            code: transformResult.code,
+            map: transformResult.map ? JSON.parse(transformResult.map) : null,
+          };
+        } catch (error) {
+          // Re-throw with better context
+          if (error instanceof Error) {
+            throw new Error(`Failed to transform decorators in ${id}: ${error.message}`);
+          }
+          throw error;
         }
-        
-        const transformResult = result as TransformResult;
-        
-        // Check for transformation errors
-        if (transformResult.errors.length > 0) {
-          throw new Error(
-            `WASM transformer errors in ${id}:\n${transformResult.errors.join('\n')}`
-          );
+      } else {
+        // Use Babel fallback if WASM is not available
+        try {
+          return await transformWithBabel(code, id);
+        } catch (error) {
+          // Re-throw with better context
+          if (error instanceof Error) {
+            throw new Error(`Failed to transform decorators in ${id}: ${error.message}`);
+          }
+          throw error;
         }
-        
-        return {
-          code: transformResult.code,
-          map: transformResult.map ? JSON.parse(transformResult.map) : null,
-        };
-      } catch (error) {
-        // Re-throw with better context
-        if (error instanceof Error) {
-          throw new Error(`Failed to transform decorators in ${id}: ${error.message}`);
-        }
-        throw error;
       }
     },
   };

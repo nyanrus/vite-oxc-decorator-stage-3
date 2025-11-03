@@ -333,9 +333,6 @@ describe('Stage 3 Decorator Transformation', () => {
       `;
 
       const output = await transformCode(input);
-      console.log('===== TRANSFORMED OUTPUT =====');
-      console.log(output);
-      console.log('===== END OUTPUT =====');
       expect(output).toBeTruthy();
       expect(output).toContain('function noraComponent');
       expect(output).toContain('class BrowserShareMode');

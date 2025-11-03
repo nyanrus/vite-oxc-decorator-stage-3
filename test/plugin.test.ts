@@ -80,8 +80,8 @@ describe('Vite Plugin', () => {
         expect(typeof result.code).toBe('string');
         // Decorator should be removed from class declaration
         expect(result.code).not.toContain('@noraComponent');
-        // Export default should remain
-        expect(result.code).toContain('export default');
+        // Export default should remain (either as "export default" or "export { X as default }")
+        expect(result.code).toMatch(/export\s+(default|{\s*\w+\s+as\s+default\s*})/);
         // Should not have invalid syntax
         expect(result.code).not.toContain('export default @');
         // Should have static block
