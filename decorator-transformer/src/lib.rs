@@ -106,7 +106,7 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
         // This handles: class C {, class C extends X {, etc.
         let class_name_pattern = format!("class {}", transformation.class_name);
         
-        let (class_start_pos, injection_point) = if let Some(class_pos) = code.find(&class_name_pattern) {
+        let (class_start_pos, class_body_start) = if let Some(class_pos) = code.find(&class_name_pattern) {
             // Find the opening brace after the class name
             let search_start = class_pos + class_name_pattern.len();
             let brace_offset = code[search_start..].find('{')
@@ -119,7 +119,7 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
             (None, None)
         };
         
-        if let (Some(class_pos), Some(injection_point)) = (class_start_pos, injection_point) {
+        if let (Some(class_pos), Some(injection_point)) = (class_start_pos, class_body_start) {
             // Inject variable declarations before the class
             let before_class = &code[..class_pos];
             let after_class_start = &code[class_pos..];
@@ -135,7 +135,53 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
             let before = &code[..adjusted_injection_point];
             let after = &code[adjusted_injection_point..];
             *code = format!("{}\n  {}{}", before, transformation.static_block_code, after);
+            
+            // If we need instance initialization, inject constructor code
+            if transformation.needs_instance_init {
+                inject_constructor_init(code, &transformation.class_name, adjusted_injection_point + transformation.static_block_code.len() + 3);
+            }
         }
+    }
+}
+
+/// Inject _initProto call into constructor
+fn inject_constructor_init(code: &mut String, _class_name: &str, class_body_start: usize) {
+    // Find the constructor within the class body
+    let class_body = &code[class_body_start..];
+    
+    // Look for existing constructor
+    if let Some(ctor_pos) = class_body.find("constructor(") {
+        // Found existing constructor - inject after super() if present, or at start
+        let ctor_start = class_body_start + ctor_pos;
+        let ctor_body_start = if let Some(brace_pos) = code[ctor_start..].find('{') {
+            ctor_start + brace_pos + 1
+        } else {
+            return; // Malformed constructor
+        };
+        
+        // Look for super() call
+        let ctor_body = &code[ctor_body_start..];
+        if let Some(super_pos) = ctor_body.find("super(") {
+            // Find the end of the super() call (semicolon or newline)
+            let super_start = ctor_body_start + super_pos;
+            if let Some(semi_pos) = code[super_start..].find(';') {
+                let injection_point = super_start + semi_pos + 1;
+                let before = &code[..injection_point];
+                let after = &code[injection_point..];
+                *code = format!("{}\n    _initProto(this);{}", before, after);
+            }
+        } else {
+            // No super() - inject at start of constructor body
+            let before = &code[..ctor_body_start];
+            let after = &code[ctor_body_start..];
+            *code = format!("{}\n    _initProto(this);{}", before, after);
+        }
+    } else {
+        // No constructor - create one
+        // We need to inject right after the static block
+        let before = &code[..class_body_start];
+        let after = &code[class_body_start..];
+        *code = format!("{}\n  constructor() {{\n    _initProto(this);\n  }}{}", before, after);
     }
 }
 
@@ -910,6 +956,131 @@ class Class8 {
             assert!(!res.code.contains("@validate"), "@ syntax should be removed");
             
             assert_eq!(res.errors.len(), 0, "Should have no errors");
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_constructor_injection {
+    use crate::transform;
+
+    #[test]
+    #[ignore]
+    fn test_field_decorator_with_constructor() {
+        let code = r#"
+function validated(value, { kind }) {
+    if (kind === "field") {
+        return function(initialValue) {
+            console.log("Field initialized");
+            return initialValue;
+        };
+    }
+}
+
+class C {
+    @validated
+    field = 1;
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== FIELD DECORATOR OUTPUT ===\n{}\n=== END ===\n", res.code);
+            assert!(res.code.contains("constructor()"));
+            assert!(res.code.contains("_initProto(this)"));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_field_decorator_with_existing_constructor() {
+        let code = r#"
+function validated(value, { kind }) {
+    if (kind === "field") {
+        return function(initialValue) {
+            return initialValue;
+        };
+    }
+}
+
+class C {
+    @validated
+    field = 1;
+    
+    constructor() {
+        console.log("Constructor");
+    }
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== FIELD WITH EXISTING CTOR ===\n{}\n=== END ===\n", res.code);
+            assert!(res.code.contains("_initProto(this)"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_super_handling {
+    use crate::transform;
+
+    #[test]
+    #[ignore]
+    fn test_field_decorator_with_super() {
+        let code = r#"
+function validated(value, { kind }) {
+    if (kind === "field") {
+        return function(initialValue) {
+            return initialValue;
+        };
+    }
+}
+
+class Base {
+    constructor(x) {
+        this.x = x;
+    }
+}
+
+class C extends Base {
+    @validated
+    field = 1;
+    
+    constructor() {
+        super(42);
+        console.log("After super");
+    }
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== FIELD WITH SUPER ===\n{}\n=== END ===\n", res.code);
+            assert!(res.code.contains("super(42)"));
+            assert!(res.code.contains("_initProto(this)"));
+            // _initProto should be after super() call
+            let super_pos = res.code.find("super(42);").unwrap();
+            let init_pos = res.code.find("_initProto(this)").unwrap();
+            assert!(init_pos > super_pos, "_initProto should be after super()");
         }
     }
 }
