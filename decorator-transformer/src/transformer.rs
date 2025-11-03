@@ -1,6 +1,7 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_traverse::{Traverse, TraverseCtx};
+use oxc_codegen::Codegen;
 use std::cell::RefCell;
 
 /// Represents the kind of decorator according to TC39 Stage 3 decorator specification
@@ -114,19 +115,15 @@ impl<'a> DecoratorTransformer<'a> {
         }).collect()
     }
     
+    fn generate_expression_code(&self, expr: &Expression<'a>) -> String {
+        let mut codegen = Codegen::new();
+        codegen.print_expression(expr);
+        codegen.into_source_text()
+    }
+    
     fn extract_decorator_names(&self, decorators: &oxc_allocator::Vec<'a, Decorator<'a>>) -> Vec<String> {
         decorators.iter().map(|dec| {
-            match &dec.expression {
-                Expression::Identifier(ident) => ident.name.to_string(),
-                Expression::CallExpression(call) => {
-                    if let Expression::Identifier(ident) = &call.callee {
-                        ident.name.to_string()
-                    } else {
-                        "decorator".to_string()
-                    }
-                }
-                _ => "decorator".to_string(),
-            }
+            self.generate_expression_code(&dec.expression)
         }).collect()
     }
     
@@ -183,17 +180,7 @@ impl<'a> DecoratorTransformer<'a> {
     
     fn collect_class_decorators(&self, class: &Class<'a>) -> Vec<String> {
         class.decorators.iter().map(|dec| {
-            match &dec.expression {
-                Expression::Identifier(ident) => ident.name.to_string(),
-                Expression::CallExpression(call) => {
-                    if let Expression::Identifier(ident) = &call.callee {
-                        ident.name.to_string()
-                    } else {
-                        "decorator".to_string()
-                    }
-                }
-                _ => "decorator".to_string(),
-            }
+            self.generate_expression_code(&dec.expression)
         }).collect()
     }
     

@@ -772,3 +772,56 @@ class MyClass {
         }
     }
 }
+
+#[cfg(test)]
+mod test_problem_statement {
+    use crate::transform;
+
+    #[test]
+    fn test_problem_statement_decorator() {
+        let code = r###"
+import { render } from "@nora/solid-xul";
+import { ShareModeElement } from "./browser-share-mode.tsx";
+import {
+  noraComponent,
+  NoraComponentBase,
+} from "#features-chrome/utils/base.ts";
+
+@noraComponent(import.meta.hot)
+export default class BrowserShareMode extends NoraComponentBase {
+  init() {
+    this.logger.info("Hello from Logger!");
+    render(ShareModeElement, document.querySelector("#menu_ToolsPopup"), {
+      marker: document.querySelector("#menu_openFirefoxView")!,
+      hotCtx: import.meta.hot,
+    });
+  }
+
+  _metadata() {
+    return {
+      moduleName: "browser-share-mode",
+      dependencies: [],
+      softDependencies: [],
+    };
+  }
+}
+"###;
+        
+        let result = transform(
+            "test.ts".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== TRANSFORMED CODE ===\n{}\n=== END ===\n", res.code);
+            // Verify decorator call expression is preserved
+            assert!(res.code.contains("noraComponent(import.meta.hot)"), 
+                "Expected noraComponent(import.meta.hot) in output");
+            assert!(!res.code.contains("@noraComponent"), 
+                "Decorator syntax should be removed");
+            assert_eq!(res.errors.len(), 0, "Should have no errors");
+        }
+    }
+}
