@@ -103,6 +103,9 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 /// Find the absolute position where variable declarations should be injected
 /// by analyzing the text before the class keyword.
 ///
+/// This function is designed to work with oxc-generated code output, which is
+/// well-formed and doesn't contain comments or strings in unexpected positions.
+///
 /// This handles cases like:
 /// - `class C {}` -> returns position before 'class'
 /// - `export class C {}` -> returns position before 'export'
@@ -110,7 +113,7 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 ///
 /// # Arguments
 /// * `before_class` - The text content before the 'class' keyword
-/// * `class_pos` - The absolute position where 'class' keyword starts
+/// * `class_pos` - The absolute position where 'class' keyword starts (must be valid)
 ///
 /// # Returns
 /// The absolute position where variable declarations should be injected
@@ -128,12 +131,14 @@ fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
     let trimmed = line_content.trim_start();
     if trimmed.starts_with("export") {
         // Find the actual position of "export" keyword (handles leading whitespace)
-        // We know this will succeed because trimmed.starts_with("export") is true
-        let export_offset = line_content.find("export").unwrap();
+        // Since trimmed (which is line_content without leading whitespace) starts with "export",
+        // we know "export" must exist in line_content
+        let export_offset = line_content.find("export")
+            .expect("export keyword must exist since trimmed starts with it");
         line_start + export_offset
     } else {
         // No export on this line, inject right before "class"
-        // (class_pos is already an absolute position)
+        // (class_pos is already an absolute position provided by the caller)
         class_pos
     }
 }
