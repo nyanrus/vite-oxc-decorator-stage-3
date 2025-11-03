@@ -114,12 +114,20 @@ fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
         .map(|pos| pos + 1)
         .unwrap_or(0);
     
-    // Get the content from line start to class
+    // Get the content from line start to where we found 'class'
     let line_content = &before_class[line_start..];
     
-    // Check if this line contains "export" before where class would be
-    if line_content.trim_start().starts_with("export") {
-        line_start
+    // Check if this line contains "export" keyword before where class would be
+    // This handles both "export class" and "export default class"
+    let trimmed = line_content.trim_start();
+    if trimmed.starts_with("export") {
+        // Find the actual position of "export" keyword in the original string
+        // This handles cases with leading whitespace
+        if let Some(export_offset) = line_content.find("export") {
+            line_start + export_offset
+        } else {
+            line_start
+        }
     } else {
         // No export, inject right before "class"
         class_pos
