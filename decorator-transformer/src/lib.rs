@@ -739,3 +739,36 @@ export default class BrowserShareMode extends NoraComponentBase {
         }
     }
 }
+#[cfg(test)]
+mod test_decorator_call {
+    use crate::transform;
+
+    #[test]
+    fn test_decorator_with_call() {
+        let code = r#"
+function noraComponent(hotCtx) {
+    return function(target) {
+        console.log("Decorated with hotCtx:", hotCtx);
+        return target;
+    };
+}
+
+@noraComponent(import.meta.hot)
+class MyClass {
+    method() {}
+}
+"#;
+        
+        let result = transform(
+            "test.js".to_string(),
+            code.to_string(),
+            "{}".to_string(),
+        );
+        
+        assert!(result.is_ok());
+        if let Ok(res) = result {
+            println!("\n=== TRANSFORMED CODE ===\n{}\n=== END ===\n", res.code);
+            assert_eq!(res.errors.len(), 0);
+        }
+    }
+}
