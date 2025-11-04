@@ -192,6 +192,9 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 /// AST traversal. The alternative would be a second AST pass before codegen, but the current
 /// approach is simpler and works correctly for all test cases.
 ///
+/// The decorator expressions are now stored as AST nodes throughout the transformation pipeline,
+/// and only converted to strings here at the final stage for code generation.
+///
 /// Transforms:
 /// - `@dec export default class C {}` → `let C = class C {}; C = _applyDecs(C, [], [dec]).c[0]; export default C;`
 /// - `@dec export class C {}` → `let C = class C {}; C = _applyDecs(C, [], [dec]).c[0]; export { C };`
@@ -201,7 +204,14 @@ fn apply_class_decorator_replacements_string(code: &str, class_info: &[ClassDeco
     
     for info in class_info {
         let class_name = &info.class_name;
-        let decorators = info.decorator_names.join(", ");
+        
+        // Convert decorator Expression nodes to strings for code generation
+        let decorator_strings: Vec<String> = info.decorators.iter().map(|expr| {
+            let mut codegen = Codegen::new();
+            codegen.print_expression(expr);
+            codegen.into_source_text()
+        }).collect();
+        let decorators = decorator_strings.join(", ");
         
         let export_default_pattern = format!("export default class {}", class_name);
         if let Some(export_pos) = result.find(&export_default_pattern) {
