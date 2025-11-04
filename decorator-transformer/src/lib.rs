@@ -62,12 +62,10 @@ pub fn transform(
     
     traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, TransformerState);
     
-    // Step 3: Inject variable declarations via AST instead of string manipulation
     inject_variable_declarations_ast(&mut parse_result.program, &allocator);
     
     let mut codegen_result = Codegen::new().build(&parse_result.program);
     
-    // Step 4: Handle class decorator replacements (post-codegen string manipulation)
     let class_decorator_info = transformer.get_classes_with_class_decorators();
     if !class_decorator_info.is_empty() {
         codegen_result.code = apply_class_decorator_replacements_string(&codegen_result.code, &class_decorator_info);
