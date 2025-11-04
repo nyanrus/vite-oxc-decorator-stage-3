@@ -47,8 +47,20 @@ impl<'a> DecoratorTransformer<'a> {
         }
     }
     
-    pub fn get_classes_with_class_decorators(&self) -> &Vec<ClassDecoratorInfo<'a>> {
-        unsafe { &*self.classes_with_class_decorators.as_ptr() }
+    /// Get the collected class decorator information.
+    /// This extracts the data from the RefCell by converting expressions to strings.
+    pub fn get_class_decorator_strings(&self) -> Vec<(String, Vec<String>)> {
+        self.classes_with_class_decorators.borrow()
+            .iter()
+            .map(|info| {
+                let decorator_strings = info.decorators.iter().map(|expr| {
+                    let mut codegen = Codegen::new();
+                    codegen.print_expression(expr);
+                    codegen.into_source_text()
+                }).collect();
+                (info.class_name.clone(), decorator_strings)
+            })
+            .collect()
     }
     
     pub fn check_for_decorators(&self, program: &Program<'a>) -> bool {
@@ -95,22 +107,25 @@ impl<'a> DecoratorTransformer<'a> {
                 let callee = self.clone_expression(&call.callee, ctx);
                 
                 // Clone arguments
+                // Argument enum inherits all Expression variants plus SpreadElement
                 let mut arguments = ctx.ast.vec();
                 for arg in &call.arguments {
-                    // Argument is an enum that can be Expression or SpreadElement
                     let cloned_arg = match arg {
                         Argument::SpreadElement(spread) => {
                             let spread_arg = self.clone_expression(&spread.argument, ctx);
                             Argument::SpreadElement(ctx.ast.alloc(ctx.ast.spread_element(SPAN, spread_arg)))
                         }
                         _ => {
-                            // For all expression-based arguments, clone the expression
-                            if let Some(expr) = arg.as_expression() {
-                                Argument::from(self.clone_expression(expr, ctx))
-                            } else {
-                                // Fallback: use the original argument
-                                // This handles other argument types
-                                continue;
+                            // All other Argument variants are Expression variants
+                            // as_expression() returns Some for all expression-based arguments
+                            match arg.as_expression() {
+                                Some(expr) => Argument::from(self.clone_expression(expr, ctx)),
+                                None => {
+                                    // This should be unreachable since we handle SpreadElement above
+                                    // and all other Argument variants are expressions.
+                                    // If we somehow get here, skip the argument to avoid a panic.
+                                    unreachable!("Unexpected non-expression, non-spread argument in decorator call");
+                                }
                             }
                         }
                     };

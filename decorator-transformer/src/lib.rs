@@ -10,7 +10,7 @@ use oxc_semantic::SemanticBuilder;
 
 mod transformer;
 mod codegen;
-use transformer::{DecoratorTransformer, TransformerState, ClassDecoratorInfo};
+use transformer::{DecoratorTransformer, TransformerState};
 use codegen::generate_helper_functions;
 
 // Generate bindings from WIT file
@@ -66,7 +66,7 @@ pub fn transform(
     
     let mut codegen_result = Codegen::new().build(&parse_result.program);
     
-    let class_decorator_info = transformer.get_classes_with_class_decorators();
+    let class_decorator_info = transformer.get_class_decorator_strings();
     if !class_decorator_info.is_empty() {
         codegen_result.code = apply_class_decorator_replacements_string(&codegen_result.code, &class_decorator_info);
     }
@@ -205,25 +205,17 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 /// AST traversal. The alternative would be a second AST pass before codegen, but the current
 /// approach is simpler and works correctly for all test cases.
 ///
-/// The decorator expressions are now stored as AST nodes throughout the transformation pipeline,
-/// and only converted to strings here at the final stage for code generation.
+/// The decorator expressions are stored as AST nodes throughout the transformation pipeline,
+/// and only converted to strings at extraction time for code generation.
 ///
 /// Transforms:
 /// - `@dec export default class C {}` → `let C = class C {}; C = _applyDecs(C, [], [dec]).c[0]; export default C;`
 /// - `@dec export class C {}` → `let C = class C {}; C = _applyDecs(C, [], [dec]).c[0]; export { C };`
 /// - `@dec class C {}` → `let C = class C {}; C = _applyDecs(C, [], [dec]).c[0];`
-fn apply_class_decorator_replacements_string(code: &str, class_info: &[ClassDecoratorInfo]) -> String {
+fn apply_class_decorator_replacements_string(code: &str, class_info: &[(String, Vec<String>)]) -> String {
     let mut result = code.to_string();
     
-    for info in class_info {
-        let class_name = &info.class_name;
-        
-        // Convert decorator Expression nodes to strings for code generation
-        let decorator_strings: Vec<String> = info.decorators.iter().map(|expr| {
-            let mut codegen = Codegen::new();
-            codegen.print_expression(expr);
-            codegen.into_source_text()
-        }).collect();
+    for (class_name, decorator_strings) in class_info {
         let decorators = decorator_strings.join(", ");
         
         let export_default_pattern = format!("export default class {}", class_name);
