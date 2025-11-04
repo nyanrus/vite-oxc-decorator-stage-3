@@ -47,8 +47,8 @@ function isTransformError(result: TransformResult | TransformError): result is T
   return 'tag' in result && result.tag === 'err';
 }
 
-function normalizePatterns(pattern?: RegExp | RegExp[]): RegExp[] {
-  return Array.isArray(pattern) ? pattern : [pattern!];
+function normalizePatterns(pattern: RegExp | RegExp[]): RegExp[] {
+  return Array.isArray(pattern) ? pattern : [pattern];
 }
 
 export default function viteOxcDecoratorStage3(
