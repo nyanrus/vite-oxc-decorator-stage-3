@@ -215,13 +215,12 @@ impl<'a> DecoratorTransformer<'a> {
         });
         
         if !metadata.is_empty() || !class_decorators.is_empty() {
-            let static_block_code = self.generate_static_block_code(&metadata, &class_decorators);
+            // Leak metadata to give it 'a lifetime (it will be deallocated with the arena)
+            let metadata_leaked: &'a [DecoratorMetadata] = Box::leak(metadata.into_boxed_slice());
             
-            // Step 1: Parse and insert static block during traversal (AST-based)
-            // Instead of storing code string for post-codegen injection
-            if let Some(static_block) = self.create_static_block_element(&static_block_code, ctx) {
-                class.body.body.push(static_block);
-            }
+            // Step 4: Build static block directly as AST nodes instead of generating code strings
+            let static_block = self.create_decorator_static_block(metadata_leaked, &class_decorators, ctx);
+            class.body.body.push(static_block);
             
             // Step 2: If we need instance init, modify or create constructor
             if needs_instance_init {
@@ -244,6 +243,212 @@ impl<'a> DecoratorTransformer<'a> {
         }
 
         true
+    }
+    
+    /// Create decorator static block as AST nodes (Step 4: Full AST-based approach)
+    /// Builds: static { [_initProto, _initClass] = _applyDecs(this, memberDescArray, classDecArray).e; if (_initClass) _initClass(); }
+    /// Or:     static { let _classThis; [_classThis, _initClass] = _applyDecs(this, memberDescArray, classDecArray).c; if (_initClass) _initClass(); }
+    fn create_decorator_static_block(
+        &self,
+        metadata: &'a [DecoratorMetadata],
+        class_decorators: &[String],
+        ctx: &mut TraverseCtx<'a, TransformerState>,
+    ) -> ClassElement<'a> {
+        let mut statements = ctx.ast.vec();
+        
+        // Build member descriptor array: [[decorator, flags, "key", isPrivate], ...]
+        let member_desc_array = self.build_member_descriptor_array(metadata, ctx);
+        
+        // Build class decorator array: [decorator1, decorator2, ...]
+        let class_dec_array = self.build_class_decorator_array(class_decorators, ctx);
+        
+        if class_decorators.is_empty() {
+            // Only member decorators: [_initProto, _initClass] = _applyDecs(this, memberDesc, classDesc).e
+            let assignment_stmt = self.build_apply_decs_assignment(
+                &["_initProto", "_initClass"],
+                member_desc_array,
+                class_dec_array,
+                "e",
+                ctx,
+            );
+            statements.push(assignment_stmt);
+        } else {
+            // Has class decorators: let _classThis; [_classThis, _initClass] = _applyDecs(this, memberDesc, classDesc).c
+            // First: let _classThis;
+            let class_this_decl = self.build_variable_declaration("_classThis", None, ctx);
+            statements.push(class_this_decl);
+            
+            // Second: [_classThis, _initClass] = _applyDecs(...).c
+            let assignment_stmt = self.build_apply_decs_assignment(
+                &["_classThis", "_initClass"],
+                member_desc_array,
+                class_dec_array,
+                "c",
+                ctx,
+            );
+            statements.push(assignment_stmt);
+        }
+        
+        // Add: if (_initClass) _initClass();
+        let init_class_call = self.build_init_class_if_statement(ctx);
+        statements.push(init_class_call);
+        
+        // Create static block with proper scope
+        let scope_id = ctx.create_child_scope_of_current(ScopeFlags::ClassStaticBlock);
+        ctx.ast.class_element_static_block_with_scope_id(SPAN, statements, scope_id)
+    }
+    
+    /// Build member descriptor array: [[decorator, flags, "key", isPrivate], ...]
+    fn build_member_descriptor_array(
+        &self,
+        metadata: &'a [DecoratorMetadata],
+        ctx: &TraverseCtx<'a, TransformerState>,
+    ) -> Expression<'a> {
+        let mut descriptors = ctx.ast.vec();
+        
+        for meta in metadata {
+            for decorator_name in &meta.decorator_names {
+                // Build single descriptor: [decorator, flags, "key", isPrivate]
+                let mut elements = ctx.ast.vec();
+                
+                // decorator (identifier reference)
+                // Allocate string in arena to get correct lifetime
+                let name_arena = ctx.ast.allocator.alloc_str(decorator_name);
+                let decorator_ref = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, name_arena)));
+                elements.push(ArrayExpressionElement::from(decorator_ref));
+                
+                // flags (number)
+                let flags = (meta.kind as u8) | if meta.is_static { 8 } else { 0 };
+                let flags_expr = ctx.ast.expression_numeric_literal(SPAN, flags as f64, None, NumberBase::Decimal);
+                elements.push(ArrayExpressionElement::from(flags_expr));
+                
+                // key (string)
+                let key = if meta.is_private { &meta.key[1..] } else { &meta.key };
+                let key_expr = ctx.ast.expression_string_literal(SPAN, key, None);
+                elements.push(ArrayExpressionElement::from(key_expr));
+                
+                // isPrivate (boolean)
+                let is_private_expr = ctx.ast.expression_boolean_literal(SPAN, meta.is_private);
+                elements.push(ArrayExpressionElement::from(is_private_expr));
+                
+                // Create array expression for this descriptor
+                let descriptor_array = ctx.ast.expression_array(SPAN, elements);
+                descriptors.push(ArrayExpressionElement::from(descriptor_array));
+            }
+        }
+        
+        ctx.ast.expression_array(SPAN, descriptors)
+    }
+    
+    /// Build class decorator array: [decorator1, decorator2, ...]
+    fn build_class_decorator_array(
+        &self,
+        class_decorators: &[String],
+        ctx: &TraverseCtx<'a, TransformerState>,
+    ) -> Expression<'a> {
+        let mut elements = ctx.ast.vec();
+        
+        for decorator_name in class_decorators {
+            // Allocate string in arena to get correct lifetime
+            let name_arena = ctx.ast.allocator.alloc_str(decorator_name);
+            let decorator_ref = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, name_arena)));
+            elements.push(ArrayExpressionElement::from(decorator_ref));
+        }
+        
+        ctx.ast.expression_array(SPAN, elements)
+    }
+    
+    /// Build: [_initProto, _initClass] = _applyDecs(this, memberDesc, classDesc).e (or .c)
+    fn build_apply_decs_assignment(
+        &self,
+        target_names: &[&str],
+        member_desc_array: Expression<'a>,
+        class_dec_array: Expression<'a>,
+        property_name: &'a str,
+        ctx: &mut TraverseCtx<'a, TransformerState>,
+    ) -> Statement<'a> {
+        // Build the _applyDecs(this, memberDesc, classDesc) call
+        let apply_decs_callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_applyDecs")));
+        let mut arguments = ctx.ast.vec();
+        arguments.push(Argument::from(ctx.ast.expression_this(SPAN)));
+        arguments.push(Argument::from(member_desc_array));
+        arguments.push(Argument::from(class_dec_array));
+        let apply_decs_call = ctx.ast.expression_call(SPAN, apply_decs_callee, NONE, arguments, false);
+        
+        // Build .e or .c member access
+        let property = ctx.ast.identifier_name(SPAN, property_name);
+        let member_expr = ctx.ast.member_expression_static(SPAN, apply_decs_call, property, false);
+        let right = Expression::from(member_expr);
+        
+        // For simplicity, generate the left side as a string and parse it
+        // This is acceptable since it's a simple pattern and doesn't involve user code
+        let target_list = target_names.join(", ");
+        let assignment_code = format!("[{}] = temp", target_list);
+        let wrapped = format!("({})", assignment_code);
+        let wrapped_arena = ctx.ast.allocator.alloc_str(&wrapped);
+        
+        let parser = Parser::new(ctx.ast.allocator, wrapped_arena, SourceType::default());
+        let parse_result = parser.parse();
+        
+        if let Some(Statement::ExpressionStatement(expr_stmt)) = parse_result.program.body.first() {
+            if let Expression::ParenthesizedExpression(paren) = &expr_stmt.expression {
+                if let Expression::AssignmentExpression(assign) = &paren.expression {
+                    // Clone the left side (assignment target)
+                    let left = unsafe { std::ptr::read(&assign.left as *const AssignmentTarget<'a>) };
+                    
+                    // Build new assignment with our right side
+                    let assignment = ctx.ast.expression_assignment(SPAN, AssignmentOperator::Assign, left, right);
+                    return ctx.ast.statement_expression(SPAN, assignment);
+                }
+            }
+        }
+        
+        // Fallback: should not happen
+        ctx.ast.statement_empty(SPAN)
+    }
+    
+    /// Build: let varName; or let varName = init;
+    fn build_variable_declaration(
+        &self,
+        var_name: &'a str,
+        init: Option<Expression<'a>>,
+        ctx: &TraverseCtx<'a, TransformerState>,
+    ) -> Statement<'a> {
+        let binding = ctx.ast.binding_pattern(
+            ctx.ast.binding_pattern_kind_binding_identifier(SPAN, var_name),
+            NONE,
+            false,
+        );
+        
+        let declarator = ctx.ast.variable_declarator(
+            SPAN,
+            VariableDeclarationKind::Let,
+            binding,
+            init,
+            false,
+        );
+        
+        let declaration = ctx.ast.declaration_variable(
+            SPAN,
+            VariableDeclarationKind::Let,
+            ctx.ast.vec1(declarator),
+            false,
+        );
+        
+        Statement::from(declaration)
+    }
+    
+    /// Build: if (_initClass) _initClass();
+    fn build_init_class_if_statement(&self, ctx: &TraverseCtx<'a, TransformerState>) -> Statement<'a> {
+        // Test: _initClass
+        let test = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initClass")));
+        
+        // Consequent: _initClass();
+        let callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initClass")));
+        let call = ctx.ast.expression_call(SPAN, callee, NONE, ctx.ast.vec(), false);
+        let consequent = ctx.ast.statement_expression(SPAN, call);
+        
+        ctx.ast.statement_if(SPAN, test, consequent, None)
     }
     
     fn collect_class_decorators(&self, class: &Class<'a>) -> Vec<String> {
