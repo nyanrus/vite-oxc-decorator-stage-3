@@ -54,7 +54,7 @@ use oxc_traverse::{Traverse, TraverseCtx};
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
 use oxc_semantic::ScopeFlags;
-use oxc_span::{Span, SourceType, SPAN};
+use oxc_span::{SourceType, SPAN};
 use std::cell::RefCell;
 
 /// Represents the kind of decorator according to TC39 Stage 3 decorator specification
@@ -75,19 +75,9 @@ pub struct DecoratorTransformer<'a> {
     in_decorated_class: RefCell<bool>,
     helpers_injected: RefCell<bool>,
     _allocator: &'a Allocator,
-    pub transformations: RefCell<Vec<ClassTransformation>>,
 }
 
 pub struct TransformerState;
-
-#[derive(Debug, Clone)]
-pub struct ClassTransformation {
-    pub class_name: String,
-    #[allow(dead_code)]  // Used for AST-based positioning (future improvement)
-    pub class_span: Span,  // Store span instead of relying on string search
-    pub static_block_code: String,
-    pub needs_instance_init: bool,  // True if field/accessor decorators exist
-}
 
 impl<'a> DecoratorTransformer<'a> {
     pub fn new(allocator: &'a Allocator) -> Self {
@@ -96,7 +86,6 @@ impl<'a> DecoratorTransformer<'a> {
             in_decorated_class: RefCell::new(false),
             helpers_injected: RefCell::new(false),
             _allocator: allocator,
-            transformations: RefCell::new(Vec::new()),
         }
     }
     
@@ -217,10 +206,6 @@ impl<'a> DecoratorTransformer<'a> {
         *self.in_decorated_class.borrow_mut() = true;
         *self.helpers_injected.borrow_mut() = true;
         
-        let class_name = class.id.as_ref()
-            .map(|id| id.name.to_string())
-            .unwrap_or_else(|| "AnonymousClass".to_string());
-        
         let metadata = self.collect_decorator_metadata(class);
         let class_decorators = self.collect_class_decorators(class);
         
@@ -238,19 +223,13 @@ impl<'a> DecoratorTransformer<'a> {
                 class.body.body.push(static_block);
             }
             
-            // If we need instance init, modify or create constructor
+            // Step 2: If we need instance init, modify or create constructor
             if needs_instance_init {
                 self.ensure_constructor_with_init(class, ctx);
             }
             
-            // Store transformation info for variable declaration injection (Step 3)
-            // Still needed to track which classes were decorated
-            self.transformations.borrow_mut().push(ClassTransformation {
-                class_name,
-                class_span: class.span,
-                static_block_code: String::new(), // No longer needed for static block, kept for compatibility
-                needs_instance_init,
-            });
+            // Step 3: Variable declarations are now injected via AST after traversal
+            // No need to track transformations anymore
         }
         
         class.decorators.clear();

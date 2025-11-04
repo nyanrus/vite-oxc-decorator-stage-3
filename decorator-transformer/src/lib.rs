@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use oxc_allocator::Allocator;
-use oxc_ast::ast::Program;
+use oxc_ast::{NONE, ast::{Program, Statement, Declaration, VariableDeclarationKind, ClassElement}};
+use oxc_ast::AstBuilder;
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc_span::{SourceType, SPAN};
 use oxc_traverse::traverse_mut;
 use oxc_semantic::SemanticBuilder;
 
@@ -61,8 +62,10 @@ pub fn transform(
     
     traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, TransformerState);
     
+    // Step 3: Inject variable declarations via AST instead of string manipulation
+    inject_variable_declarations_ast(&mut parse_result.program, &allocator);
+    
     let mut codegen_result = Codegen::new().build(&parse_result.program);
-    inject_static_blocks(&mut codegen_result.code, &transformer.transformations.borrow());
     
     if transformer.needs_helpers() {
         codegen_result.code = format!("{}\n{}", generate_helper_functions(), codegen_result.code);
@@ -77,6 +80,93 @@ pub fn transform(
         },
         errors: transformer.errors,
     })
+}
+
+/// Inject variable declarations (let _initProto, _initClass;) before decorated classes
+/// Step 3: AST-based approach - scans program body for classes with static blocks
+/// and inserts variable declarations as AST nodes
+fn inject_variable_declarations_ast<'a>(program: &mut Program<'a>, allocator: &'a Allocator) {
+    let ast = AstBuilder::new(allocator);
+    let mut insertions: Vec<(usize, Statement<'a>)> = Vec::new();
+    
+    // Find all class declarations (including exported ones) that have static blocks
+    for (i, stmt) in program.body.iter().enumerate() {
+        let has_static_block = match stmt {
+            Statement::ClassDeclaration(class) => class_has_static_block(class),
+            Statement::ExportDefaultDeclaration(export) => {
+                matches!(&export.declaration, oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) if class_has_static_block(class))
+            }
+            Statement::ExportNamedDeclaration(export) => {
+                matches!(&export.declaration, Some(Declaration::ClassDeclaration(class)) if class_has_static_block(class))
+            }
+            _ => false,
+        };
+        
+        if has_static_block {
+            // Create: let _initProto, _initClass;
+            let var_decl = create_init_variables_declaration(&ast);
+            insertions.push((i, var_decl));
+        }
+    }
+    
+    // Insert declarations in reverse order to maintain correct indices
+    for (index, decl) in insertions.into_iter().rev() {
+        program.body.insert(index, decl);
+    }
+}
+
+/// Check if a class has a static block (indicating it was decorated)
+fn class_has_static_block(class: &oxc_ast::ast::Class) -> bool {
+    class.body.body.iter().any(|element| {
+        matches!(element, ClassElement::StaticBlock(_))
+    })
+}
+
+/// Create variable declaration: let _initProto, _initClass;
+fn create_init_variables_declaration<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
+    // Create binding for _initProto
+    let init_proto_binding = ast.binding_pattern(
+        ast.binding_pattern_kind_binding_identifier(SPAN, "_initProto"),
+        NONE,
+        false,
+    );
+    
+    let init_proto_declarator = ast.variable_declarator(
+        SPAN,
+        VariableDeclarationKind::Let,
+        init_proto_binding,
+        None,  // init: Option<Expression>
+        false,
+    );
+    
+    // Create binding for _initClass
+    let init_class_binding = ast.binding_pattern(
+        ast.binding_pattern_kind_binding_identifier(SPAN, "_initClass"),
+        NONE,
+        false,
+    );
+    
+    let init_class_declarator = ast.variable_declarator(
+        SPAN,
+        VariableDeclarationKind::Let,
+        init_class_binding,
+        None,  // init: Option<Expression>
+        false,
+    );
+    
+    // Create variable declaration with both declarators
+    let mut declarators = ast.vec();
+    declarators.push(init_proto_declarator);
+    declarators.push(init_class_declarator);
+    
+    let declaration = ast.declaration_variable(
+        SPAN,
+        VariableDeclarationKind::Let,
+        declarators,
+        false,
+    );
+    
+    Statement::from(declaration)
 }
 
 fn parse_options(options: &str) -> Result<TransformOptions, String> {
@@ -100,120 +190,6 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
     })
 }
 
-/// Find the absolute position where variable declarations should be injected
-/// by analyzing the text before the class keyword.
-///
-/// NOTE: This function uses string manipulation. An AST-based approach would:
-/// - Traverse up to the parent Statement/ModuleDeclaration node
-/// - Check if it's an ExportDeclaration wrapping the ClassDeclaration
-/// - Insert VariableDeclaration before the export/class statement
-/// - Use AST node positions from the traverse context
-///
-/// This function is designed to work with oxc-generated code output, which is
-/// well-formed and doesn't contain comments or strings in unexpected positions.
-///
-/// This handles cases like:
-/// - `class C {}` -> returns position before 'class'
-/// - `export class C {}` -> returns position before 'export'
-/// - `export default class C {}` -> returns position before 'export'
-///
-/// # Arguments
-/// * `before_class` - The text content before the 'class' keyword
-/// * `class_pos` - The absolute position where 'class' keyword starts (must be valid)
-///
-/// # Returns
-/// The absolute position where variable declarations should be injected
-fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
-    // NOTE: Using string rfind() here. AST approach would check parent node type
-    // Find the start of the current line in before_class
-    let line_start = before_class.rfind('\n')
-        .map(|pos| pos + 1)
-        .unwrap_or(0);
-    
-    // Get the content from line start to where we found 'class'
-    let line_content = &before_class[line_start..];
-    
-    // Check if this line contains "export" keyword before where class would be
-    // This handles both "export class" and "export default class"
-    let trimmed = line_content.trim_start();
-    if trimmed.starts_with("export") {
-        // Find the actual position of "export" keyword (handles leading whitespace)
-        // Since trimmed (which is line_content without leading whitespace) starts with "export",
-        // we know "export" must exist in line_content
-        let export_offset = line_content.find("export")
-            .expect("export keyword must exist since trimmed starts with it");
-        line_start + export_offset
-    } else {
-        // No export on this line, inject right before "class"
-        // (class_pos is already an absolute position provided by the caller)
-        class_pos
-    }
-}
-
-/// Inject static blocks and variable declarations into generated code
-/// 
-/// NOTE: This function uses string manipulation (find, format) on generated code.
-/// An AST-based approach would:
-/// 1. During AST traversal, directly insert StaticBlock nodes into class.body.body
-/// 2. Insert VariableDeclaration nodes before ClassDeclaration in the program body
-/// 3. Modify or create Constructor nodes in the AST
-/// 4. Use the stored class_span for positioning instead of string search
-/// 
-/// Challenges with pure AST approach:
-/// - Requires access to parent statement list to insert var declarations
-/// - oxc's arena allocator makes node ownership transfer complex
-/// - Need to use AstBuilder from TraverseCtx to create new nodes
-/// 
-/// This hybrid approach works but could be improved by:
-/// - Parsing static block code into AST and inserting during traversal
-/// - Using class_span information for span-based positioning
-/// - Building descriptor arrays as Expression nodes instead of strings
-/// Inject variable declarations only
-/// Step 1: Static blocks are now inserted during traversal via AST
-/// Step 2: Constructor init is now inserted during traversal via AST
-/// This function still handles:
-/// - Variable declaration injection (will be moved to AST in Step 3)
-fn inject_static_blocks(code: &mut String, transformations: &[transformer::ClassTransformation]) {
-    for transformation in transformations {
-        // NOTE: Using string find() here. AST approach would use class_span to know position
-        // Search for "class ClassName" followed eventually by "{"
-        // This handles: class C {, class C extends X {, etc.
-        let class_name_pattern = format!("class {}", transformation.class_name);
-        
-        let (class_start_pos, _class_body_start) = if let Some(class_pos) = code.find(&class_name_pattern) {
-            // Find the opening brace after the class name
-            let search_start = class_pos + class_name_pattern.len();
-            let brace_offset = code[search_start..].find('{')
-                .map(|brace_offset| search_start + brace_offset + 1);
-            (Some(class_pos), brace_offset)
-        } else if transformation.class_name == "AnonymousClass" {
-            let anon_class_pos = code.find("class {");
-            (anon_class_pos, anon_class_pos.map(|pos| pos + "class {".len()))
-        } else {
-            (None, None)
-        };
-        
-        if let Some(class_pos) = class_start_pos {
-            // Find the actual start of the statement (could have 'export default' or 'export')
-            // Look backwards from class_pos to find where the statement begins
-            let before_class = &code[..class_pos];
-            
-            let var_injection_pos = find_statement_start(before_class, class_pos);
-            
-            let before_injection = &code[..var_injection_pos];
-            let after_injection = &code[var_injection_pos..];
-            
-            // Use 'let' instead of 'var' for ESNext compatibility
-            let var_decl = "let _initProto, _initClass;\n";
-            *code = format!("{}{}{}", before_injection, var_decl, after_injection);
-            
-            // Step 1 & 2 IMPROVEMENTS:
-            // - Static block is now inserted via AST during traversal
-            // - Constructor init is now inserted via AST during traversal
-            // No longer need string manipulation for these
-        }
-    }
-}
 
 // Implement the WIT interface
 struct Component;
