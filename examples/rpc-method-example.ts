@@ -99,8 +99,8 @@ export function demonstrateRPCMethods() {
 // Export the registry for inspection
 export { _rpcMethods };
 
-// Run demo if this is the main module
-if (typeof window !== 'undefined') {
+// Run demo automatically in browser context
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     demonstrateRPCMethods();
   });
