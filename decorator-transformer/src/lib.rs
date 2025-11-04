@@ -168,6 +168,11 @@ fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
 /// - Parsing static block code into AST and inserting during traversal
 /// - Using class_span information for span-based positioning
 /// - Building descriptor arrays as Expression nodes instead of strings
+/// Inject variable declarations and handle constructor init
+/// Step 1: Static blocks are now inserted during traversal via AST
+/// This function still handles:
+/// - Variable declaration injection (will be moved to AST in Step 3)
+/// - Constructor init injection (will be moved to AST in Step 2)
 fn inject_static_blocks(code: &mut String, transformations: &[transformer::ClassTransformation]) {
     for transformation in transformations {
         // NOTE: Using string find() here. AST approach would use class_span to know position
@@ -188,7 +193,7 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
             (None, None)
         };
         
-        if let (Some(class_pos), Some(injection_point)) = (class_start_pos, class_body_start) {
+        if let (Some(class_pos), Some(class_body_start)) = (class_start_pos, class_body_start) {
             // Find the actual start of the statement (could have 'export default' or 'export')
             // Look backwards from class_pos to find where the statement begins
             let before_class = &code[..class_pos];
@@ -202,20 +207,15 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
             let var_decl = "let _initProto, _initClass;\n";
             *code = format!("{}{}{}", before_injection, var_decl, after_injection);
             
-            // Adjust injection point by the length of the var declaration we just added
-            let adjusted_injection_point = injection_point + var_decl.len();
+            // Adjust class_body_start by the length of the var declaration we just added
+            let adjusted_class_body_start = class_body_start + var_decl.len();
             
-            // Now inject the static block
-            let before = &code[..adjusted_injection_point];
-            let after = &code[adjusted_injection_point..];
-            *code = format!("{}\n  {}{}", before, transformation.static_block_code, after);
+            // Step 1 IMPROVEMENT: Static block is now inserted via AST during traversal
+            // No longer need to inject static_block_code string here
             
             // If we need instance initialization, inject constructor code
-            // Note: We add formatting offset (newline + indentation) to class_body_start
-            // to account for the static block and formatting that was just injected
-            let formatting_offset = 3; // "\n  " = newline + 2-space indent
             if transformation.needs_instance_init {
-                inject_constructor_init(code, &transformation.class_name, adjusted_injection_point + transformation.static_block_code.len() + formatting_offset);
+                inject_constructor_init(code, &transformation.class_name, adjusted_class_body_start);
             }
         }
     }
