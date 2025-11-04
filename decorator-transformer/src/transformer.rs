@@ -7,9 +7,8 @@ use oxc_allocator::Allocator;
 use oxc_ast::{NONE, ast::*};
 use oxc_traverse::{Traverse, TraverseCtx};
 use oxc_codegen::Codegen;
-use oxc_parser::Parser;
 use oxc_semantic::ScopeFlags;
-use oxc_span::{SourceType, SPAN};
+use oxc_span::SPAN;
 use std::cell::RefCell;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,14 +271,17 @@ impl<'a> DecoratorTransformer<'a> {
         ctx.ast.expression_array(SPAN, descriptors)
     }
     
+    /// Build assignment statement: `[_initProto, _initClass] = _applyDecs(this, memberDecorators, []).e`
+    /// Uses AST builder to create array destructuring pattern instead of string manipulation
     fn build_apply_decs_assignment(
         &self,
-        target_names: &[&str],
+        target_names: &[&'a str],
         member_desc_array: Expression<'a>,
         class_dec_array: Expression<'a>,
         property_name: &'a str,
         ctx: &mut TraverseCtx<'a, TransformerState>,
     ) -> Statement<'a> {
+        // Build: _applyDecs(this, memberDecorators, classDecorators)
         let apply_decs_callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_applyDecs")));
         let mut arguments = ctx.ast.vec();
         arguments.push(Argument::from(ctx.ast.expression_this(SPAN)));
@@ -287,29 +289,31 @@ impl<'a> DecoratorTransformer<'a> {
         arguments.push(Argument::from(class_dec_array));
         let apply_decs_call = ctx.ast.expression_call(SPAN, apply_decs_callee, NONE, arguments, false);
         
+        // Build: _applyDecs(...).e (or .c for class decorators)
         let property = ctx.ast.identifier_name(SPAN, property_name);
         let member_expr = ctx.ast.member_expression_static(SPAN, apply_decs_call, property, false);
         let right = Expression::from(member_expr);
         
-        let target_list = target_names.join(", ");
-        let assignment_code = format!("[{}] = temp", target_list);
-        let wrapped = format!("({})", assignment_code);
-        let wrapped_arena = ctx.ast.allocator.alloc_str(&wrapped);
-        
-        let parser = Parser::new(ctx.ast.allocator, wrapped_arena, SourceType::default());
-        let parse_result = parser.parse();
-        
-        if let Some(Statement::ExpressionStatement(expr_stmt)) = parse_result.program.body.first() {
-            if let Expression::ParenthesizedExpression(paren) = &expr_stmt.expression {
-                if let Expression::AssignmentExpression(assign) = &paren.expression {
-                    let left = unsafe { std::ptr::read(&assign.left as *const AssignmentTarget<'a>) };
-                    let assignment = ctx.ast.expression_assignment(SPAN, AssignmentOperator::Assign, left, right);
-                    return ctx.ast.statement_expression(SPAN, assignment);
-                }
-            }
+        // Build array assignment targets: [_initProto, _initClass]
+        let mut assignment_elements = ctx.ast.vec();
+        for &name in target_names {
+            // Create identifier reference and wrap in box
+            let ident_ref = ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, name));
+            let target = AssignmentTargetMaybeDefault::from(
+                SimpleAssignmentTarget::AssignmentTargetIdentifier(ident_ref)
+            );
+            assignment_elements.push(Some(target));
         }
         
-        ctx.ast.statement_empty(SPAN)
+        // Build: [_initProto, _initClass] = _applyDecs(this, ...).e
+        let array_assignment_target = ctx.ast.assignment_target_pattern_array_assignment_target(
+            SPAN,
+            assignment_elements,
+            NONE
+        );
+        let assignment_target = AssignmentTarget::from(array_assignment_target);
+        let assignment = ctx.ast.expression_assignment(SPAN, AssignmentOperator::Assign, assignment_target, right);
+        ctx.ast.statement_expression(SPAN, assignment)
     }
     fn build_init_class_if_statement(&self, ctx: &TraverseCtx<'a, TransformerState>) -> Statement<'a> {
         let test = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initClass")));
