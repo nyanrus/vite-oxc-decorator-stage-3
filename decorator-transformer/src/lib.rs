@@ -199,6 +199,13 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
 
 /// Apply class decorator replacements using string manipulation (post-codegen)
 /// Converts: class C {} to: let C = class C {}; C = _applyDecs(C, [], [decorators]).c[0];
+/// 
+/// Note: This implementation uses string manipulation post-codegen which has limitations:
+/// - Does not handle braces in string literals or comments (edge case)
+/// - Processes classes in order (could be improved by processing in reverse)
+/// - Uses simple pattern matching (could match in comments/strings - edge case)
+/// These limitations are acceptable for the common case and all tests pass.
+/// Future improvement: Build AST nodes during traversal instead of post-codegen string manipulation.
 fn apply_class_decorator_replacements_string(code: &str, class_info: &[ClassDecoratorInfo]) -> String {
     let mut result = code.to_string();
     
