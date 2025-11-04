@@ -347,9 +347,9 @@ function _applyDecs(
   
   appliedDecorators = [];
   
-  const addClassInitializer = function (initializer) {
+  const addClassInitializer = function (initializer, isStatic) {
     if (initializer) {
-      appliedDecorators.push(createInitializerWrapper(initializer));
+      appliedDecorators.push(createInitializerWrapper(initializer, isStatic, 0));
     }
   };
   
@@ -398,8 +398,11 @@ function _applyDecs(
   processDecorators(0, 1);
   
   // Add proto and static initializers
-  addClassInitializer(protoInitializers);
-  addClassInitializer(staticInitializers);
+  // Pass isStatic flag to ensure 'this' is correctly bound in initializers:
+  // - For instance methods (isStatic=0): this = instance, use this.constructor.name
+  // - For static methods (isStatic=8): this = class, use this.name
+  addClassInitializer(protoInitializers, 0);
+  addClassInitializer(staticInitializers, 8);
   
   existingMetadata = appliedDecorators;
   
