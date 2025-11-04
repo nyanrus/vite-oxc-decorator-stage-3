@@ -1,7 +1,4 @@
 /// Load TC39 Stage 3 decorator runtime helper functions from external file.
-/// 
-/// The helper functions are defined in a separate JavaScript file (helpers.js)
-/// to improve readability and maintainability. The file is included at compile time.
 pub fn generate_helper_functions() -> &'static str {
     include_str!("helpers.js")
 }
