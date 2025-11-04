@@ -54,7 +54,7 @@ use oxc_traverse::{Traverse, TraverseCtx};
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
 use oxc_semantic::ScopeFlags;
-use oxc_span::{SourceType, SPAN};
+use oxc_span::{SourceType, SPAN, Span};
 use std::cell::RefCell;
 
 /// Represents the kind of decorator according to TC39 Stage 3 decorator specification
@@ -74,7 +74,15 @@ pub struct DecoratorTransformer<'a> {
     pub errors: Vec<String>,
     in_decorated_class: RefCell<bool>,
     helpers_injected: RefCell<bool>,
+    classes_with_class_decorators: RefCell<Vec<ClassDecoratorInfo>>,
     _allocator: &'a Allocator,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassDecoratorInfo {
+    pub class_name: String,
+    pub decorator_names: Vec<String>,
+    pub span: Span,
 }
 
 pub struct TransformerState;
@@ -85,8 +93,13 @@ impl<'a> DecoratorTransformer<'a> {
             errors: Vec::new(),
             in_decorated_class: RefCell::new(false),
             helpers_injected: RefCell::new(false),
+            classes_with_class_decorators: RefCell::new(Vec::new()),
             _allocator: allocator,
         }
+    }
+    
+    pub fn get_classes_with_class_decorators(&self) -> Vec<ClassDecoratorInfo> {
+        self.classes_with_class_decorators.borrow().clone()
     }
     
     pub fn check_for_decorators(&self, program: &Program<'a>) -> bool {
@@ -209,6 +222,16 @@ impl<'a> DecoratorTransformer<'a> {
         let metadata = self.collect_decorator_metadata(class);
         let class_decorators = self.collect_class_decorators(class);
         
+        // Track if this class has class decorators (will need post-processing)
+        if !class_decorators.is_empty() {
+            let class_name = class.id.as_ref().map(|id| id.name.to_string()).unwrap_or_else(|| "default".to_string());
+            self.classes_with_class_decorators.borrow_mut().push(ClassDecoratorInfo {
+                class_name,
+                decorator_names: class_decorators.clone(),
+                span: class.span,
+            });
+        }
+        
         // Check if we need instance initialization (field or accessor decorators)
         let needs_instance_init = metadata.iter().any(|m| {
             m.kind == DecoratorKind::Field || m.kind == DecoratorKind::Accessor
@@ -246,8 +269,8 @@ impl<'a> DecoratorTransformer<'a> {
     }
     
     /// Create decorator static block as AST nodes (Step 4: Full AST-based approach)
-    /// Builds: static { [_initProto, _initClass] = _applyDecs(this, memberDescArray, classDecArray).e; if (_initClass) _initClass(); }
-    /// Or:     static { let _classThis; [_classThis, _initClass] = _applyDecs(this, memberDescArray, classDecArray).c; if (_initClass) _initClass(); }
+    /// Builds: static { [_initProto, _initClass] = _applyDecs(this, memberDescArray, []).e; if (_initClass) _initClass(); }
+    /// Note: class decorators are applied outside the class, so we always pass [] for class decorators
     fn create_decorator_static_block(
         &self,
         metadata: &'a [DecoratorMetadata],
@@ -259,35 +282,20 @@ impl<'a> DecoratorTransformer<'a> {
         // Build member descriptor array: [[decorator, flags, "key", isPrivate], ...]
         let member_desc_array = self.build_member_descriptor_array(metadata, ctx);
         
-        // Build class decorator array: [decorator1, decorator2, ...]
-        let class_dec_array = self.build_class_decorator_array(class_decorators, ctx);
+        // For static block, always use empty class decorator array
+        // Class decorators are applied outside the class in a separate statement
+        let empty_class_dec_array = ctx.ast.expression_array(SPAN, ctx.ast.vec());
         
-        if class_decorators.is_empty() {
-            // Only member decorators: [_initProto, _initClass] = _applyDecs(this, memberDesc, classDesc).e
-            let assignment_stmt = self.build_apply_decs_assignment(
-                &["_initProto", "_initClass"],
-                member_desc_array,
-                class_dec_array,
-                "e",
-                ctx,
-            );
-            statements.push(assignment_stmt);
-        } else {
-            // Has class decorators: let _classThis; [_classThis, _initClass] = _applyDecs(this, memberDesc, classDesc).c
-            // First: let _classThis;
-            let class_this_decl = self.build_variable_declaration("_classThis", None, ctx);
-            statements.push(class_this_decl);
-            
-            // Second: [_classThis, _initClass] = _applyDecs(...).c
-            let assignment_stmt = self.build_apply_decs_assignment(
-                &["_classThis", "_initClass"],
-                member_desc_array,
-                class_dec_array,
-                "c",
-                ctx,
-            );
-            statements.push(assignment_stmt);
-        }
+        // Always use .e for member decorators in the static block
+        // Class decorators will be applied outside the class via post-processing
+        let assignment_stmt = self.build_apply_decs_assignment(
+            &["_initProto", "_initClass"],
+            member_desc_array,
+            empty_class_dec_array,
+            "e",
+            ctx,
+        );
+        statements.push(assignment_stmt);
         
         // Add: if (_initClass) _initClass();
         let init_class_call = self.build_init_class_if_statement(ctx);
