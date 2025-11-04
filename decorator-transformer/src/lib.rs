@@ -13,7 +13,6 @@ mod codegen;
 use transformer::{DecoratorTransformer, TransformerState};
 use codegen::generate_helper_functions;
 
-// Generate bindings from WIT file
 wit_bindgen::generate!({
     world: "transformer",
     exports: {
@@ -40,8 +39,7 @@ pub fn transform(
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(&filename).unwrap_or_default();
     
-    let parser = Parser::new(&allocator, &source_text, source_type);
-    let mut parse_result = parser.parse();
+    let mut parse_result = parse_source(&allocator, &source_text, source_type)?;
     
     if !parse_result.errors.is_empty() {
         return Ok(TransformResult {
@@ -57,104 +55,113 @@ pub fn transform(
         return generate_result(&parse_result.program, &opts, vec![]);
     }
 
-    let semantic = SemanticBuilder::new().build(&parse_result.program);
-    let scoping = semantic.semantic.into_scoping();
-    
-    traverse_mut(&mut transformer, &allocator, &mut parse_result.program, scoping, TransformerState);
-    
-    // Step 3: Inject variable declarations via AST instead of string manipulation
-    inject_variable_declarations_ast(&mut parse_result.program, &allocator);
+    apply_decorator_transformation(&mut transformer, &allocator, &mut parse_result.program);
+    inject_variable_declarations(&mut parse_result.program, &allocator);
     
     let mut codegen_result = Codegen::new().build(&parse_result.program);
     
     if transformer.needs_helpers() {
-        codegen_result.code = format!("{}\n{}", generate_helper_functions(), codegen_result.code);
+        prepend_helper_functions(&mut codegen_result.code);
     }
     
-    Ok(TransformResult {
+    Ok(create_transform_result(codegen_result, &opts, transformer.errors))
+}
+
+fn parse_source<'a>(
+    allocator: &'a Allocator,
+    source_text: &'a str,
+    source_type: SourceType,
+) -> Result<oxc_parser::ParserReturn<'a>, String> {
+    let parser = Parser::new(allocator, source_text, source_type);
+    Ok(parser.parse())
+}
+
+fn apply_decorator_transformation<'a>(
+    transformer: &mut DecoratorTransformer<'a>,
+    allocator: &'a Allocator,
+    program: &mut Program<'a>,
+) {
+    let semantic = SemanticBuilder::new().build(program);
+    let scoping = semantic.semantic.into_scoping();
+    traverse_mut(transformer, allocator, program, scoping, TransformerState);
+}
+
+fn prepend_helper_functions(code: &mut String) {
+    *code = format!("{}\n{}", generate_helper_functions(), code);
+}
+
+fn create_transform_result(
+    codegen_result: oxc_codegen::CodegenReturn,
+    opts: &TransformOptions,
+    errors: Vec<String>,
+) -> TransformResult {
+    TransformResult {
         code: codegen_result.code,
         map: if opts.source_maps {
             codegen_result.map.map(|m| m.to_json_string())
         } else {
             None
         },
-        errors: transformer.errors,
-    })
+        errors,
+    }
 }
 
-/// Inject variable declarations (let _initProto, _initClass;) before decorated classes
-/// Step 3: AST-based approach - scans program body for classes with static blocks
-/// and inserts variable declarations as AST nodes
-fn inject_variable_declarations_ast<'a>(program: &mut Program<'a>, allocator: &'a Allocator) {
+fn inject_variable_declarations<'a>(program: &mut Program<'a>, allocator: &'a Allocator) {
     let ast = AstBuilder::new(allocator);
-    let mut insertions: Vec<(usize, Statement<'a>)> = Vec::new();
-    
-    // Find all class declarations (including exported ones) that have static blocks
-    for (i, stmt) in program.body.iter().enumerate() {
-        let has_static_block = match stmt {
-            Statement::ClassDeclaration(class) => class_has_static_block(class),
-            Statement::ExportDefaultDeclaration(export) => {
-                matches!(&export.declaration, oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) if class_has_static_block(class))
+    let insertions = find_classes_needing_variables(program);
+    insert_variable_declarations(program, &ast, insertions);
+}
+
+fn find_classes_needing_variables(program: &Program) -> Vec<usize> {
+    program.body.iter()
+        .enumerate()
+        .filter_map(|(index, stmt)| {
+            if statement_has_decorated_class(stmt) {
+                Some(index)
+            } else {
+                None
             }
-            Statement::ExportNamedDeclaration(export) => {
-                matches!(&export.declaration, Some(Declaration::ClassDeclaration(class)) if class_has_static_block(class))
-            }
-            _ => false,
-        };
-        
-        if has_static_block {
-            // Create: let _initProto, _initClass;
-            let var_decl = create_init_variables_declaration(&ast);
-            insertions.push((i, var_decl));
+        })
+        .collect()
+}
+
+fn statement_has_decorated_class(stmt: &Statement) -> bool {
+    match stmt {
+        Statement::ClassDeclaration(class) => class_has_static_block(class),
+        Statement::ExportDefaultDeclaration(export) => {
+            matches!(&export.declaration, oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) if class_has_static_block(class))
         }
-    }
-    
-    // Insert declarations in reverse order to maintain correct indices
-    for (index, decl) in insertions.into_iter().rev() {
-        program.body.insert(index, decl);
+        Statement::ExportNamedDeclaration(export) => {
+            matches!(&export.declaration, Some(Declaration::ClassDeclaration(class)) if class_has_static_block(class))
+        }
+        _ => false,
     }
 }
 
-/// Check if a class has a static block (indicating it was decorated)
 fn class_has_static_block(class: &oxc_ast::ast::Class) -> bool {
     class.body.body.iter().any(|element| {
         matches!(element, ClassElement::StaticBlock(_))
     })
 }
 
-/// Create variable declaration: let _initProto, _initClass;
+fn insert_variable_declarations<'a>(
+    program: &mut Program<'a>,
+    ast: &AstBuilder<'a>,
+    indices: Vec<usize>,
+) {
+    for index in indices.into_iter().rev() {
+        let var_decl = create_init_variables_declaration(ast);
+        program.body.insert(index, var_decl);
+    }
+}
+
 fn create_init_variables_declaration<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
-    // Create binding for _initProto
-    let init_proto_binding = ast.binding_pattern(
-        ast.binding_pattern_kind_binding_identifier(SPAN, "_initProto"),
-        NONE,
-        false,
-    );
+    let init_proto_binding = create_binding(ast, "_initProto");
+    let init_class_binding = create_binding(ast, "_initClass");
     
-    let init_proto_declarator = ast.variable_declarator(
-        SPAN,
-        VariableDeclarationKind::Let,
-        init_proto_binding,
-        None,  // init: Option<Expression>
-        false,
-    );
+    let init_proto_declarator = create_declarator(ast, init_proto_binding);
+    let init_class_declarator = create_declarator(ast, init_class_binding);
     
-    // Create binding for _initClass
-    let init_class_binding = ast.binding_pattern(
-        ast.binding_pattern_kind_binding_identifier(SPAN, "_initClass"),
-        NONE,
-        false,
-    );
-    
-    let init_class_declarator = ast.variable_declarator(
-        SPAN,
-        VariableDeclarationKind::Let,
-        init_class_binding,
-        None,  // init: Option<Expression>
-        false,
-    );
-    
-    // Create variable declaration with both declarators
     let mut declarators = ast.vec();
     declarators.push(init_proto_declarator);
     declarators.push(init_class_declarator);
@@ -169,6 +176,27 @@ fn create_init_variables_declaration<'a>(ast: &AstBuilder<'a>) -> Statement<'a> 
     Statement::from(declaration)
 }
 
+fn create_binding<'a>(ast: &AstBuilder<'a>, name: &'a str) -> oxc_ast::ast::BindingPattern<'a> {
+    ast.binding_pattern(
+        ast.binding_pattern_kind_binding_identifier(SPAN, name),
+        NONE,
+        false,
+    )
+}
+
+fn create_declarator<'a>(
+    ast: &AstBuilder<'a>,
+    binding: oxc_ast::ast::BindingPattern<'a>,
+) -> oxc_ast::ast::VariableDeclarator<'a> {
+    ast.variable_declarator(
+        SPAN,
+        VariableDeclarationKind::Let,
+        binding,
+        None,
+        false,
+    )
+}
+
 fn parse_options(options: &str) -> Result<TransformOptions, String> {
     if options.is_empty() {
         Ok(TransformOptions { source_maps: true })
@@ -177,7 +205,11 @@ fn parse_options(options: &str) -> Result<TransformOptions, String> {
     }
 }
 
-fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: Vec<String>) -> Result<TransformResult, String> {
+fn generate_result<'a>(
+    program: &Program<'a>,
+    opts: &TransformOptions,
+    errors: Vec<String>,
+) -> Result<TransformResult, String> {
     let codegen_result = Codegen::new().build(program);
     Ok(TransformResult {
         code: codegen_result.code,
@@ -190,8 +222,6 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
     })
 }
 
-
-// Implement the WIT interface
 struct Component;
 
 impl Guest for Component {
