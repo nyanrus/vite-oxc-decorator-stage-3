@@ -232,9 +232,13 @@ impl<'a> DecoratorTransformer<'a> {
             });
         }
         
-        // Check if we need instance initialization (field or accessor decorators)
+        // Check if we need instance initialization (any non-static member decorator)
+        // Method, Getter, and Setter decorators can also call addInitializer per TC39 spec
         let needs_instance_init = metadata.iter().any(|m| {
-            m.kind == DecoratorKind::Field || m.kind == DecoratorKind::Accessor
+            !m.is_static && matches!(
+                m.kind,
+                DecoratorKind::Field | DecoratorKind::Accessor | DecoratorKind::Method | DecoratorKind::Getter | DecoratorKind::Setter
+            )
         });
         
         if !metadata.is_empty() || !class_decorators.is_empty() {
