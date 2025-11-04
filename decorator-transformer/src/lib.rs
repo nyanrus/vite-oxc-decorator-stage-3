@@ -168,11 +168,11 @@ fn find_statement_start(before_class: &str, class_pos: usize) -> usize {
 /// - Parsing static block code into AST and inserting during traversal
 /// - Using class_span information for span-based positioning
 /// - Building descriptor arrays as Expression nodes instead of strings
-/// Inject variable declarations and handle constructor init
+/// Inject variable declarations only
 /// Step 1: Static blocks are now inserted during traversal via AST
+/// Step 2: Constructor init is now inserted during traversal via AST
 /// This function still handles:
 /// - Variable declaration injection (will be moved to AST in Step 3)
-/// - Constructor init injection (will be moved to AST in Step 2)
 fn inject_static_blocks(code: &mut String, transformations: &[transformer::ClassTransformation]) {
     for transformation in transformations {
         // NOTE: Using string find() here. AST approach would use class_span to know position
@@ -180,7 +180,7 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
         // This handles: class C {, class C extends X {, etc.
         let class_name_pattern = format!("class {}", transformation.class_name);
         
-        let (class_start_pos, class_body_start) = if let Some(class_pos) = code.find(&class_name_pattern) {
+        let (class_start_pos, _class_body_start) = if let Some(class_pos) = code.find(&class_name_pattern) {
             // Find the opening brace after the class name
             let search_start = class_pos + class_name_pattern.len();
             let brace_offset = code[search_start..].find('{')
@@ -193,7 +193,7 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
             (None, None)
         };
         
-        if let (Some(class_pos), Some(class_body_start)) = (class_start_pos, class_body_start) {
+        if let Some(class_pos) = class_start_pos {
             // Find the actual start of the statement (could have 'export default' or 'export')
             // Look backwards from class_pos to find where the statement begins
             let before_class = &code[..class_pos];
@@ -207,81 +207,11 @@ fn inject_static_blocks(code: &mut String, transformations: &[transformer::Class
             let var_decl = "let _initProto, _initClass;\n";
             *code = format!("{}{}{}", before_injection, var_decl, after_injection);
             
-            // Adjust class_body_start by the length of the var declaration we just added
-            let adjusted_class_body_start = class_body_start + var_decl.len();
-            
-            // Step 1 IMPROVEMENT: Static block is now inserted via AST during traversal
-            // No longer need to inject static_block_code string here
-            
-            // If we need instance initialization, inject constructor code
-            if transformation.needs_instance_init {
-                inject_constructor_init(code, &transformation.class_name, adjusted_class_body_start);
-            }
+            // Step 1 & 2 IMPROVEMENTS:
+            // - Static block is now inserted via AST during traversal
+            // - Constructor init is now inserted via AST during traversal
+            // No longer need string manipulation for these
         }
-    }
-}
-
-/// Inject _initProto call into constructor
-/// 
-/// NOTE: This function uses string find() to locate constructor in generated code.
-/// An AST-based approach would:
-/// 1. During AST traversal in enter_class, find or create Constructor MethodDefinition
-/// 2. Insert the _initProto(this) call statement into constructor body
-/// 3. Handle super() calls by inserting after the super() statement
-/// 4. Use AstBuilder to create the if statement and call expression nodes
-/// 
-/// This would avoid string manipulation entirely.
-fn inject_constructor_init(code: &mut String, _class_name: &str, class_body_start: usize) {
-    // NOTE: Using string find() here. AST approach would iterate class.body.body elements
-    // Find the constructor within the class body
-    let class_body = &code[class_body_start..];
-    
-    // Look for existing constructor
-    if let Some(ctor_pos) = class_body.find("constructor(") {
-        // Found existing constructor - inject after super() if present, or at start
-        let ctor_start = class_body_start + ctor_pos;
-        let ctor_body_start = if let Some(brace_pos) = code[ctor_start..].find('{') {
-            ctor_start + brace_pos + 1
-        } else {
-            return; // Malformed constructor
-        };
-        
-        // Look for super() call
-        let ctor_body = &code[ctor_body_start..];
-        if let Some(super_pos) = ctor_body.find("super(") {
-            // Find the end of the super() call - look for semicolon or closing paren followed by newline/space
-            let super_start = ctor_body_start + super_pos;
-            let search_from = super_start + "super(".len();
-            
-            // Find the matching closing paren (simple approach - look for first ')')
-            if let Some(paren_pos) = code[search_from..].find(')') {
-                let call_end = search_from + paren_pos + 1;
-                
-                // Find the statement end (semicolon or newline)
-                let remaining = &code[call_end..];
-                let injection_point = if let Some(semi_pos) = remaining.find(';') {
-                    call_end + semi_pos + 1
-                } else {
-                    // No semicolon - inject right after the closing paren
-                    call_end
-                };
-                
-                let before = &code[..injection_point];
-                let after = &code[injection_point..];
-                *code = format!("{}\n    if (_initProto) _initProto(this);{}", before, after);
-            }
-        } else {
-            // No super() - inject at start of constructor body
-            let before = &code[..ctor_body_start];
-            let after = &code[ctor_body_start..];
-            *code = format!("{}\n    if (_initProto) _initProto(this);{}", before, after);
-        }
-    } else {
-        // No constructor - create one
-        // We need to inject right after the static block
-        let before = &code[..class_body_start];
-        let after = &code[class_body_start..];
-        *code = format!("{}\n  constructor() {{\n    if (_initProto) _initProto(this);\n  }}{}", before, after);
     }
 }
 

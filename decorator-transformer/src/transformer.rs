@@ -49,7 +49,7 @@
 //! See oxc's own transformers for reference implementations.
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::*;
+use oxc_ast::{NONE, ast::*};
 use oxc_traverse::{Traverse, TraverseCtx};
 use oxc_codegen::Codegen;
 use oxc_parser::Parser;
@@ -396,23 +396,134 @@ impl<'a> DecoratorTransformer<'a> {
         None
     }
     
-    /// Ensure constructor exists and has _initProto call
-    fn ensure_constructor_with_init(&self, class: &mut Class<'a>, _ctx: &mut TraverseCtx<'a, TransformerState>) {
+    /// Ensure constructor exists and has _initProto call (Step 2: AST-based)
+    fn ensure_constructor_with_init(&self, class: &mut Class<'a>, ctx: &mut TraverseCtx<'a, TransformerState>) {
         // Find existing constructor
-        let has_constructor = class.body.body.iter().any(|element| {
+        let constructor_index = class.body.body.iter().position(|element| {
             matches!(element, ClassElement::MethodDefinition(m) 
                 if m.kind == MethodDefinitionKind::Constructor)
         });
         
-        if !has_constructor {
-            // TODO: Create a new constructor with _initProto call
-            // This requires using AstBuilder from ctx to create the constructor node
-            // For now, we'll rely on the post-processing approach
+        if let Some(index) = constructor_index {
+            // Modify existing constructor via AST
+            if let ClassElement::MethodDefinition(method) = &mut class.body.body[index] {
+                if let Some(ref mut body) = method.value.body {
+                    // Find position to insert: after super() if exists, otherwise at start
+                    let insert_pos = self.find_super_call_insert_position(&body.statements);
+                    
+                    // Build: if (_initProto) _initProto(this);
+                    let init_stmt = self.build_init_proto_if_statement(ctx);
+                    body.statements.insert(insert_pos, init_stmt);
+                }
+            }
         } else {
-            // TODO: Modify existing constructor to add _initProto call
-            // This requires inserting statements at the right position
-            // For now, we'll rely on the post-processing approach
+            // Create new constructor with _initProto call
+            let constructor = self.create_constructor_with_init(class, ctx);
+            class.body.body.insert(0, constructor);
         }
+    }
+    
+    /// Find position in constructor where _initProto should be inserted
+    /// Returns position after super() call if it exists, otherwise 0
+    fn find_super_call_insert_position(&self, statements: &oxc_allocator::Vec<Statement>) -> usize {
+        for (i, stmt) in statements.iter().enumerate() {
+            if let Statement::ExpressionStatement(expr_stmt) = stmt {
+                if let Expression::CallExpression(call) = &expr_stmt.expression {
+                    if matches!(&call.callee, Expression::Super(_)) {
+                        // Found super() call, insert after it
+                        return i + 1;
+                    }
+                }
+            }
+        }
+        // No super() found, insert at beginning
+        0
+    }
+    
+    /// Build: if (_initProto) _initProto(this);
+    fn build_init_proto_if_statement(&self, ctx: &TraverseCtx<'a, TransformerState>) -> Statement<'a> {
+        // Build test: _initProto
+        let test = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initProto")));
+        
+        // Build consequent: _initProto(this);
+        let callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initProto")));
+        let mut arguments = ctx.ast.vec();
+        arguments.push(Argument::from(ctx.ast.expression_this(SPAN)));
+        let call = ctx.ast.expression_call(SPAN, callee, NONE, arguments, false);
+        let consequent = ctx.ast.statement_expression(SPAN, call);
+        
+        ctx.ast.statement_if(SPAN, test, consequent, None)
+    }
+    
+    /// Create a new constructor with _initProto call
+    fn create_constructor_with_init(
+        &self,
+        class: &Class<'a>,
+        ctx: &mut TraverseCtx<'a, TransformerState>,
+    ) -> ClassElement<'a> {
+        let mut statements = ctx.ast.vec();
+        
+        // If class has super class, add super() call first
+        if class.super_class.is_some() {
+            let super_call = ctx.ast.expression_call(
+                SPAN,
+                ctx.ast.expression_super(SPAN),
+                NONE,
+                ctx.ast.vec(),
+                false,
+            );
+            statements.push(ctx.ast.statement_expression(SPAN, super_call));
+        }
+        
+        // Add: if (_initProto) _initProto(this);
+        let init_stmt = self.build_init_proto_if_statement(ctx);
+        statements.push(init_stmt);
+        
+        // Build function body
+        let body = ctx.ast.alloc_function_body(SPAN, ctx.ast.vec(), statements);
+        
+        // Build constructor function with proper scope
+        let scope_id = ctx.create_child_scope_of_current(
+            ScopeFlags::Function | ScopeFlags::Constructor
+        );
+        
+        let params = ctx.ast.alloc_formal_parameters(
+            SPAN,
+            FormalParameterKind::FormalParameter,
+            ctx.ast.vec(),
+            NONE,
+        );
+        
+        let function = ctx.ast.alloc_function_with_scope_id(
+            SPAN,
+            FunctionType::FunctionExpression,
+            None,  // id: Option<BindingIdentifier>
+            false,
+            false,
+            false,
+            NONE,
+            NONE,
+            params,
+            NONE,
+            Some(body),
+            scope_id,
+        );
+        
+        // Build constructor method definition
+        let key = PropertyKey::StaticIdentifier(ctx.ast.alloc_identifier_name(SPAN, "constructor"));
+        ctx.ast.class_element_method_definition(
+            SPAN,
+            MethodDefinitionType::MethodDefinition,
+            ctx.ast.vec(),  // decorators
+            key,
+            function,
+            MethodDefinitionKind::Constructor,
+            false,  // computed
+            false,  // static
+            false,  // r#override
+            false,  // optional
+            None,   // accessibility: Option<TSAccessibility>
+        )
     }
 }
 
