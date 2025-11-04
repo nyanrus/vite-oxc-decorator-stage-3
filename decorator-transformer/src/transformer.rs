@@ -121,9 +121,9 @@ impl<'a> DecoratorTransformer<'a> {
                             match arg.as_expression() {
                                 Some(expr) => Argument::from(self.clone_expression(expr, ctx)),
                                 None => {
-                                    // This should be unreachable since we handle SpreadElement above
+                                    // This is unreachable since we handle SpreadElement above
                                     // and all other Argument variants are expressions.
-                                    // If we somehow get here, skip the argument to avoid a panic.
+                                    // Panic if we somehow get here as it indicates a bug.
                                     unreachable!("Unexpected non-expression, non-spread argument in decorator call");
                                 }
                             }
@@ -213,6 +213,12 @@ impl<'a> DecoratorTransformer<'a> {
             });
         }
         
+        // Build the static block with member descriptors inline
+        // This is added for all decorated classes (even if only class decorators)
+        // because class decorators may also need initialization
+        let static_block = self.create_decorator_static_block_from_class(class, ctx);
+        class.body.body.push(static_block);
+        
         // Check if we need instance initialization
         let needs_instance_init = class.body.body.iter().any(|element| {
             match element {
@@ -228,10 +234,6 @@ impl<'a> DecoratorTransformer<'a> {
                 _ => false,
             }
         });
-        
-        // Build the static block with member descriptors inline
-        let static_block = self.create_decorator_static_block_from_class(class, ctx);
-        class.body.body.push(static_block);
         
         if needs_instance_init {
             self.ensure_constructor_with_init(class, ctx);
