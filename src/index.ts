@@ -20,8 +20,8 @@ interface WasmTransformer {
   transform(filename: string, sourceText: string, options: string): TransformResult | TransformError;
 }
 
-const DEFAULT_INCLUDE = /\.[jt]sx?$/;
-const DEFAULT_EXCLUDE = /node_modules/;
+const DEFAULT_INCLUDE = [/\.[jt]sx?$/];
+const DEFAULT_EXCLUDE = [/node_modules/];
 const DECORATOR_MARKER = '@';
 const TRANSFORM_OPTIONS = JSON.stringify({ source_maps: true });
 
