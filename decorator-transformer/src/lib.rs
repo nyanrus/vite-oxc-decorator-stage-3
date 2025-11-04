@@ -119,7 +119,18 @@ fn class_has_static_block(class: &oxc_ast::ast::Class) -> bool {
     })
 }
 
+/// Create variable declaration for decorator initialization functions.
+/// 
+/// Generated code:
+/// ```js
+/// let _initProto, _initClass;
+/// ```
+/// 
+/// These variables are assigned in the static block and used to:
+/// - `_initProto`: Initialize instance members (fields, accessors)
+/// - `_initClass`: Apply class decorators
 fn create_init_variables_declaration<'a>(ast: &AstBuilder<'a>) -> Statement<'a> {
+    // Create binding pattern for `_initProto`
     let init_proto_binding = ast.binding_pattern(
         ast.binding_pattern_kind_binding_identifier(SPAN, "_initProto"),
         NONE,
@@ -134,6 +145,7 @@ fn create_init_variables_declaration<'a>(ast: &AstBuilder<'a>) -> Statement<'a> 
         false,
     );
     
+    // Create binding pattern for `_initClass`
     let init_class_binding = ast.binding_pattern(
         ast.binding_pattern_kind_binding_identifier(SPAN, "_initClass"),
         NONE,
@@ -148,6 +160,7 @@ fn create_init_variables_declaration<'a>(ast: &AstBuilder<'a>) -> Statement<'a> 
         false,
     );
     
+    // Combine into a single let declaration
     let mut declarators = ast.vec();
     declarators.push(init_proto_declarator);
     declarators.push(init_class_declarator);

@@ -239,6 +239,17 @@ impl<'a> DecoratorTransformer<'a> {
     
     /// Create static block by building descriptor array directly from class elements.
     /// This avoids intermediate metadata storage and lifetime issues.
+    /// 
+    /// Generated code:
+    /// ```js
+    /// static {
+    ///     [_initProto, _initClass] = _applyDecs(this, [
+    ///         [decorator, kind, "memberName", isPrivate],
+    ///         // ... more descriptors
+    ///     ], []).e;
+    ///     if (_initClass) _initClass();
+    /// }
+    /// ```
     fn create_decorator_static_block_from_class(
         &self,
         class: &Class<'a>,
@@ -344,6 +355,13 @@ impl<'a> DecoratorTransformer<'a> {
     }
     
     /// Build a single decorator descriptor: [decorator, flags, key, isPrivate]
+    /// 
+    /// Generated code example:
+    /// ```js
+    /// [logged, 2, "method", false]  // Method decorator
+    /// [validated, 0, "field", false] // Field decorator
+    /// [tracked, 1, "data", false]   // Accessor decorator
+    /// ```
     fn build_single_descriptor(
         &self,
         decorator_expr: &Expression<'a>,
@@ -360,6 +378,8 @@ impl<'a> DecoratorTransformer<'a> {
         elements.push(ArrayExpressionElement::from(decorator));
         
         // Build flags: kind (0-4) | static flag (8)
+        // Kind values: 0=Field, 1=Accessor, 2=Method, 3=Getter, 4=Setter
+        // Static flag adds 8 to the kind value
         let flags = (kind as u8) | if is_static { 8 } else { 0 };
         let flags_expr = ctx.ast.expression_numeric_literal(SPAN, flags as f64, None, NumberBase::Decimal);
         elements.push(ArrayExpressionElement::from(flags_expr));
@@ -377,7 +397,12 @@ impl<'a> DecoratorTransformer<'a> {
     }
     
     /// Build assignment statement: `[_initProto, _initClass] = _applyDecs(this, memberDecorators, []).e`
-    /// Uses AST builder to create array destructuring pattern instead of string manipulation
+    /// Uses AST builder to create array destructuring pattern instead of string manipulation.
+    /// 
+    /// Generated code:
+    /// ```js
+    /// [_initProto, _initClass] = _applyDecs(this, memberDecorators, classDecorators).e
+    /// ```
     fn build_apply_decs_assignment(
         &self,
         target_names: &[&'a str],
@@ -389,9 +414,9 @@ impl<'a> DecoratorTransformer<'a> {
         // Build: _applyDecs(this, memberDecorators, classDecorators)
         let apply_decs_callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_applyDecs")));
         let mut arguments = ctx.ast.vec();
-        arguments.push(Argument::from(ctx.ast.expression_this(SPAN)));
-        arguments.push(Argument::from(member_desc_array));
-        arguments.push(Argument::from(class_dec_array));
+        arguments.push(Argument::from(ctx.ast.expression_this(SPAN))); // `this`
+        arguments.push(Argument::from(member_desc_array)); // member descriptor array
+        arguments.push(Argument::from(class_dec_array)); // class decorator array
         let apply_decs_call = ctx.ast.expression_call(SPAN, apply_decs_callee, NONE, arguments, false);
         
         // Build: _applyDecs(...).e (or .c for class decorators)
@@ -420,11 +445,21 @@ impl<'a> DecoratorTransformer<'a> {
         let assignment = ctx.ast.expression_assignment(SPAN, AssignmentOperator::Assign, assignment_target, right);
         ctx.ast.statement_expression(SPAN, assignment)
     }
+    /// Build if statement: `if (_initClass) _initClass();`
+    /// 
+    /// Generated code:
+    /// ```js
+    /// if (_initClass) _initClass();
+    /// ```
     fn build_init_class_if_statement(&self, ctx: &TraverseCtx<'a, TransformerState>) -> Statement<'a> {
+        // Build test condition: `_initClass`
         let test = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initClass")));
+        
+        // Build consequent: `_initClass();`
         let callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initClass")));
         let call = ctx.ast.expression_call(SPAN, callee, NONE, ctx.ast.vec(), false);
         let consequent = ctx.ast.statement_expression(SPAN, call);
+        
         ctx.ast.statement_if(SPAN, test, consequent, None)
     }
     
@@ -468,18 +503,42 @@ impl<'a> DecoratorTransformer<'a> {
         0
     }
     
+    /// Build if statement: `if (_initProto) _initProto(this);`
+    /// 
+    /// Generated code:
+    /// ```js
+    /// if (_initProto) _initProto(this);
+    /// ```
     fn build_init_proto_if_statement(&self, ctx: &TraverseCtx<'a, TransformerState>) -> Statement<'a> {
+        // Build test condition: `_initProto`
         let test = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initProto")));
         
+        // Build consequent: `_initProto(this);`
         let callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initProto")));
         let mut arguments = ctx.ast.vec();
-        arguments.push(Argument::from(ctx.ast.expression_this(SPAN)));
+        arguments.push(Argument::from(ctx.ast.expression_this(SPAN))); // `this` argument
         let call = ctx.ast.expression_call(SPAN, callee, NONE, arguments, false);
         let consequent = ctx.ast.statement_expression(SPAN, call);
         
         ctx.ast.statement_if(SPAN, test, consequent, None)
     }
     
+    /// Create a constructor with initialization code for decorated fields/accessors.
+    /// 
+    /// Generated code for class without parent:
+    /// ```js
+    /// constructor() {
+    ///     if (_initProto) _initProto(this);
+    /// }
+    /// ```
+    /// 
+    /// Generated code for class with parent:
+    /// ```js
+    /// constructor() {
+    ///     super();
+    ///     if (_initProto) _initProto(this);
+    /// }
+    /// ```
     fn create_constructor_with_init(
         &self,
         class: &Class<'a>,
@@ -487,6 +546,7 @@ impl<'a> DecoratorTransformer<'a> {
     ) -> ClassElement<'a> {
         let mut statements = ctx.ast.vec();
         
+        // If the class has a parent, call super() first
         if class.super_class.is_some() {
             let super_call = ctx.ast.expression_call(
                 SPAN,
@@ -498,6 +558,7 @@ impl<'a> DecoratorTransformer<'a> {
             statements.push(ctx.ast.statement_expression(SPAN, super_call));
         }
         
+        // Add initialization call: if (_initProto) _initProto(this);
         let init_stmt = self.build_init_proto_if_statement(ctx);
         statements.push(init_stmt);
         
