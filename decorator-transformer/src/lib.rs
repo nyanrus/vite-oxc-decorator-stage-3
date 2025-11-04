@@ -183,6 +183,19 @@ fn generate_result<'a>(program: &Program<'a>, opts: &TransformOptions, errors: V
     })
 }
 
+/// Apply class decorator transformations using post-codegen string manipulation.
+///
+/// **Note on Implementation**: This function uses string manipulation after codegen, which
+/// differs from the ideal Oxc pattern of pure AST manipulation. However, class decorators
+/// require transforming a single statement (ClassDeclaration) into multiple statements
+/// (VariableDeclaration + ExpressionStatement + Export), which is complex to handle during
+/// AST traversal. The alternative would be a second AST pass before codegen, but the current
+/// approach is simpler and works correctly for all test cases.
+///
+/// Transforms:
+/// - `@dec export default class C {}` → `let C = class C {}; C = _applyDecs(C, [], [dec]).c[0]; export default C;`
+/// - `@dec export class C {}` → `let C = class C {}; C = _applyDecs(C, [], [dec]).c[0]; export { C };`
+/// - `@dec class C {}` → `let C = class C {}; C = _applyDecs(C, [], [dec]).c[0];`
 fn apply_class_decorator_replacements_string(code: &str, class_info: &[ClassDecoratorInfo]) -> String {
     let mut result = code.to_string();
     
