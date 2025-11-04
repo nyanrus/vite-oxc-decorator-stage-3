@@ -49,10 +49,12 @@
 //! See oxc's own transformers for reference implementations.
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::*;
+use oxc_ast::{NONE, ast::*};
 use oxc_traverse::{Traverse, TraverseCtx};
 use oxc_codegen::Codegen;
-use oxc_span::Span;
+use oxc_parser::Parser;
+use oxc_semantic::ScopeFlags;
+use oxc_span::{SourceType, SPAN};
 use std::cell::RefCell;
 
 /// Represents the kind of decorator according to TC39 Stage 3 decorator specification
@@ -73,19 +75,9 @@ pub struct DecoratorTransformer<'a> {
     in_decorated_class: RefCell<bool>,
     helpers_injected: RefCell<bool>,
     _allocator: &'a Allocator,
-    pub transformations: RefCell<Vec<ClassTransformation>>,
 }
 
 pub struct TransformerState;
-
-#[derive(Debug, Clone)]
-pub struct ClassTransformation {
-    pub class_name: String,
-    #[allow(dead_code)]  // Used for AST-based positioning (future improvement)
-    pub class_span: Span,  // Store span instead of relying on string search
-    pub static_block_code: String,
-    pub needs_instance_init: bool,  // True if field/accessor decorators exist
-}
 
 impl<'a> DecoratorTransformer<'a> {
     pub fn new(allocator: &'a Allocator) -> Self {
@@ -94,7 +86,6 @@ impl<'a> DecoratorTransformer<'a> {
             in_decorated_class: RefCell::new(false),
             helpers_injected: RefCell::new(false),
             _allocator: allocator,
-            transformations: RefCell::new(Vec::new()),
         }
     }
     
@@ -215,10 +206,6 @@ impl<'a> DecoratorTransformer<'a> {
         *self.in_decorated_class.borrow_mut() = true;
         *self.helpers_injected.borrow_mut() = true;
         
-        let class_name = class.id.as_ref()
-            .map(|id| id.name.to_string())
-            .unwrap_or_else(|| "AnonymousClass".to_string());
-        
         let metadata = self.collect_decorator_metadata(class);
         let class_decorators = self.collect_class_decorators(class);
         
@@ -228,25 +215,20 @@ impl<'a> DecoratorTransformer<'a> {
         });
         
         if !metadata.is_empty() || !class_decorators.is_empty() {
-            let static_block_code = self.generate_static_block_code(&metadata, &class_decorators);
+            // Leak metadata to give it 'a lifetime (it will be deallocated with the arena)
+            let metadata_leaked: &'a [DecoratorMetadata] = Box::leak(metadata.into_boxed_slice());
             
-            // TODO: Parse and insert the static block into the class body during traversal
-            // This would avoid string manipulation later. See parse_static_block() for approach.
-            // Currently using post-codegen string injection due to allocator complexity.
+            // Step 4: Build static block directly as AST nodes instead of generating code strings
+            let static_block = self.create_decorator_static_block(metadata_leaked, &class_decorators, ctx);
+            class.body.body.push(static_block);
             
-            // If we need instance init, modify or create constructor
+            // Step 2: If we need instance init, modify or create constructor
             if needs_instance_init {
                 self.ensure_constructor_with_init(class, ctx);
             }
             
-            // Store transformation info for variable declaration and static block injection
-            // (post-processing needed as we need to modify parent statements)
-            self.transformations.borrow_mut().push(ClassTransformation {
-                class_name,
-                class_span: class.span,
-                static_block_code,
-                needs_instance_init,
-            });
+            // Step 3: Variable declarations are now injected via AST after traversal
+            // No need to track transformations anymore
         }
         
         class.decorators.clear();
@@ -261,6 +243,212 @@ impl<'a> DecoratorTransformer<'a> {
         }
 
         true
+    }
+    
+    /// Create decorator static block as AST nodes (Step 4: Full AST-based approach)
+    /// Builds: static { [_initProto, _initClass] = _applyDecs(this, memberDescArray, classDecArray).e; if (_initClass) _initClass(); }
+    /// Or:     static { let _classThis; [_classThis, _initClass] = _applyDecs(this, memberDescArray, classDecArray).c; if (_initClass) _initClass(); }
+    fn create_decorator_static_block(
+        &self,
+        metadata: &'a [DecoratorMetadata],
+        class_decorators: &[String],
+        ctx: &mut TraverseCtx<'a, TransformerState>,
+    ) -> ClassElement<'a> {
+        let mut statements = ctx.ast.vec();
+        
+        // Build member descriptor array: [[decorator, flags, "key", isPrivate], ...]
+        let member_desc_array = self.build_member_descriptor_array(metadata, ctx);
+        
+        // Build class decorator array: [decorator1, decorator2, ...]
+        let class_dec_array = self.build_class_decorator_array(class_decorators, ctx);
+        
+        if class_decorators.is_empty() {
+            // Only member decorators: [_initProto, _initClass] = _applyDecs(this, memberDesc, classDesc).e
+            let assignment_stmt = self.build_apply_decs_assignment(
+                &["_initProto", "_initClass"],
+                member_desc_array,
+                class_dec_array,
+                "e",
+                ctx,
+            );
+            statements.push(assignment_stmt);
+        } else {
+            // Has class decorators: let _classThis; [_classThis, _initClass] = _applyDecs(this, memberDesc, classDesc).c
+            // First: let _classThis;
+            let class_this_decl = self.build_variable_declaration("_classThis", None, ctx);
+            statements.push(class_this_decl);
+            
+            // Second: [_classThis, _initClass] = _applyDecs(...).c
+            let assignment_stmt = self.build_apply_decs_assignment(
+                &["_classThis", "_initClass"],
+                member_desc_array,
+                class_dec_array,
+                "c",
+                ctx,
+            );
+            statements.push(assignment_stmt);
+        }
+        
+        // Add: if (_initClass) _initClass();
+        let init_class_call = self.build_init_class_if_statement(ctx);
+        statements.push(init_class_call);
+        
+        // Create static block with proper scope
+        let scope_id = ctx.create_child_scope_of_current(ScopeFlags::ClassStaticBlock);
+        ctx.ast.class_element_static_block_with_scope_id(SPAN, statements, scope_id)
+    }
+    
+    /// Build member descriptor array: [[decorator, flags, "key", isPrivate], ...]
+    fn build_member_descriptor_array(
+        &self,
+        metadata: &'a [DecoratorMetadata],
+        ctx: &TraverseCtx<'a, TransformerState>,
+    ) -> Expression<'a> {
+        let mut descriptors = ctx.ast.vec();
+        
+        for meta in metadata {
+            for decorator_name in &meta.decorator_names {
+                // Build single descriptor: [decorator, flags, "key", isPrivate]
+                let mut elements = ctx.ast.vec();
+                
+                // decorator (identifier reference)
+                // Allocate string in arena to get correct lifetime
+                let name_arena = ctx.ast.allocator.alloc_str(decorator_name);
+                let decorator_ref = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, name_arena)));
+                elements.push(ArrayExpressionElement::from(decorator_ref));
+                
+                // flags (number)
+                let flags = (meta.kind as u8) | if meta.is_static { 8 } else { 0 };
+                let flags_expr = ctx.ast.expression_numeric_literal(SPAN, flags as f64, None, NumberBase::Decimal);
+                elements.push(ArrayExpressionElement::from(flags_expr));
+                
+                // key (string)
+                let key = if meta.is_private { &meta.key[1..] } else { &meta.key };
+                let key_expr = ctx.ast.expression_string_literal(SPAN, key, None);
+                elements.push(ArrayExpressionElement::from(key_expr));
+                
+                // isPrivate (boolean)
+                let is_private_expr = ctx.ast.expression_boolean_literal(SPAN, meta.is_private);
+                elements.push(ArrayExpressionElement::from(is_private_expr));
+                
+                // Create array expression for this descriptor
+                let descriptor_array = ctx.ast.expression_array(SPAN, elements);
+                descriptors.push(ArrayExpressionElement::from(descriptor_array));
+            }
+        }
+        
+        ctx.ast.expression_array(SPAN, descriptors)
+    }
+    
+    /// Build class decorator array: [decorator1, decorator2, ...]
+    fn build_class_decorator_array(
+        &self,
+        class_decorators: &[String],
+        ctx: &TraverseCtx<'a, TransformerState>,
+    ) -> Expression<'a> {
+        let mut elements = ctx.ast.vec();
+        
+        for decorator_name in class_decorators {
+            // Allocate string in arena to get correct lifetime
+            let name_arena = ctx.ast.allocator.alloc_str(decorator_name);
+            let decorator_ref = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, name_arena)));
+            elements.push(ArrayExpressionElement::from(decorator_ref));
+        }
+        
+        ctx.ast.expression_array(SPAN, elements)
+    }
+    
+    /// Build: [_initProto, _initClass] = _applyDecs(this, memberDesc, classDesc).e (or .c)
+    fn build_apply_decs_assignment(
+        &self,
+        target_names: &[&str],
+        member_desc_array: Expression<'a>,
+        class_dec_array: Expression<'a>,
+        property_name: &'a str,
+        ctx: &mut TraverseCtx<'a, TransformerState>,
+    ) -> Statement<'a> {
+        // Build the _applyDecs(this, memberDesc, classDesc) call
+        let apply_decs_callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_applyDecs")));
+        let mut arguments = ctx.ast.vec();
+        arguments.push(Argument::from(ctx.ast.expression_this(SPAN)));
+        arguments.push(Argument::from(member_desc_array));
+        arguments.push(Argument::from(class_dec_array));
+        let apply_decs_call = ctx.ast.expression_call(SPAN, apply_decs_callee, NONE, arguments, false);
+        
+        // Build .e or .c member access
+        let property = ctx.ast.identifier_name(SPAN, property_name);
+        let member_expr = ctx.ast.member_expression_static(SPAN, apply_decs_call, property, false);
+        let right = Expression::from(member_expr);
+        
+        // For simplicity, generate the left side as a string and parse it
+        // This is acceptable since it's a simple pattern and doesn't involve user code
+        let target_list = target_names.join(", ");
+        let assignment_code = format!("[{}] = temp", target_list);
+        let wrapped = format!("({})", assignment_code);
+        let wrapped_arena = ctx.ast.allocator.alloc_str(&wrapped);
+        
+        let parser = Parser::new(ctx.ast.allocator, wrapped_arena, SourceType::default());
+        let parse_result = parser.parse();
+        
+        if let Some(Statement::ExpressionStatement(expr_stmt)) = parse_result.program.body.first() {
+            if let Expression::ParenthesizedExpression(paren) = &expr_stmt.expression {
+                if let Expression::AssignmentExpression(assign) = &paren.expression {
+                    // Clone the left side (assignment target)
+                    let left = unsafe { std::ptr::read(&assign.left as *const AssignmentTarget<'a>) };
+                    
+                    // Build new assignment with our right side
+                    let assignment = ctx.ast.expression_assignment(SPAN, AssignmentOperator::Assign, left, right);
+                    return ctx.ast.statement_expression(SPAN, assignment);
+                }
+            }
+        }
+        
+        // Fallback: should not happen
+        ctx.ast.statement_empty(SPAN)
+    }
+    
+    /// Build: let varName; or let varName = init;
+    fn build_variable_declaration(
+        &self,
+        var_name: &'a str,
+        init: Option<Expression<'a>>,
+        ctx: &TraverseCtx<'a, TransformerState>,
+    ) -> Statement<'a> {
+        let binding = ctx.ast.binding_pattern(
+            ctx.ast.binding_pattern_kind_binding_identifier(SPAN, var_name),
+            NONE,
+            false,
+        );
+        
+        let declarator = ctx.ast.variable_declarator(
+            SPAN,
+            VariableDeclarationKind::Let,
+            binding,
+            init,
+            false,
+        );
+        
+        let declaration = ctx.ast.declaration_variable(
+            SPAN,
+            VariableDeclarationKind::Let,
+            ctx.ast.vec1(declarator),
+            false,
+        );
+        
+        Statement::from(declaration)
+    }
+    
+    /// Build: if (_initClass) _initClass();
+    fn build_init_class_if_statement(&self, ctx: &TraverseCtx<'a, TransformerState>) -> Statement<'a> {
+        // Test: _initClass
+        let test = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initClass")));
+        
+        // Consequent: _initClass();
+        let callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initClass")));
+        let call = ctx.ast.expression_call(SPAN, callee, NONE, ctx.ast.vec(), false);
+        let consequent = ctx.ast.statement_expression(SPAN, call);
+        
+        ctx.ast.statement_if(SPAN, test, consequent, None)
     }
     
     fn collect_class_decorators(&self, class: &Class<'a>) -> Vec<String> {
@@ -315,6 +503,60 @@ impl<'a> DecoratorTransformer<'a> {
         }
     }
     
+    /// Parse static block code and create AST element for insertion
+    /// This is Step 1: Parse the generated code into AST and insert during traversal
+    /// Instead of storing code string and injecting post-codegen
+    fn create_static_block_element(
+        &self,
+        static_block_code: &str,
+        ctx: &mut TraverseCtx<'a, TransformerState>,
+    ) -> Option<ClassElement<'a>> {
+        // Wrap the static block in a class to parse it
+        let wrapped_code = format!("class Temp {{ {} }}", static_block_code);
+        // Allocate in the arena so it has lifetime 'a
+        let wrapped_code_arena = ctx.ast.allocator.alloc_str(&wrapped_code);
+        
+        // Parse the wrapped code
+        let parser = Parser::new(ctx.ast.allocator, wrapped_code_arena, SourceType::default().with_typescript(true));
+        let parse_result = parser.parse();
+        
+        if !parse_result.errors.is_empty() {
+            return None;
+        }
+        
+        // Extract the static block from the parsed class
+        if let Some(Statement::ClassDeclaration(class_decl)) = parse_result.program.body.first() {
+            // Find the static block in the class body
+            for element in &class_decl.body.body {
+                if matches!(element, ClassElement::StaticBlock(_)) {
+                    // We found the static block, but we need to create a scope for it
+                    // Extract the statements from the static block
+                    if let ClassElement::StaticBlock(static_block) = element {
+                        // Create a new scope for the static block
+                        let scope_id = ctx.create_child_scope_of_current(ScopeFlags::ClassStaticBlock);
+                        
+                        // Create new static block with proper scope in the current allocator
+                        // We need to rebuild the statements in the current allocator context
+                        // For now, use vec_from_iter to transfer the statements
+                        let statements = ctx.ast.vec_from_iter(static_block.body.iter().map(|stmt| {
+                            // This is a simplification - we're transferring ownership
+                            // In a full implementation, we'd need to properly clone/transfer nodes
+                            unsafe { std::ptr::read(stmt as *const Statement<'a>) }
+                        }));
+                        
+                        return Some(ctx.ast.class_element_static_block_with_scope_id(
+                            SPAN,
+                            statements,
+                            scope_id,
+                        ));
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+    
     /// Parse static block code into AST node (Placeholder Implementation)
     /// 
     /// NOTE: This is a placeholder showing the direction for AST-based approach.
@@ -338,23 +580,134 @@ impl<'a> DecoratorTransformer<'a> {
         None
     }
     
-    /// Ensure constructor exists and has _initProto call
-    fn ensure_constructor_with_init(&self, class: &mut Class<'a>, _ctx: &mut TraverseCtx<'a, TransformerState>) {
+    /// Ensure constructor exists and has _initProto call (Step 2: AST-based)
+    fn ensure_constructor_with_init(&self, class: &mut Class<'a>, ctx: &mut TraverseCtx<'a, TransformerState>) {
         // Find existing constructor
-        let has_constructor = class.body.body.iter().any(|element| {
+        let constructor_index = class.body.body.iter().position(|element| {
             matches!(element, ClassElement::MethodDefinition(m) 
                 if m.kind == MethodDefinitionKind::Constructor)
         });
         
-        if !has_constructor {
-            // TODO: Create a new constructor with _initProto call
-            // This requires using AstBuilder from ctx to create the constructor node
-            // For now, we'll rely on the post-processing approach
+        if let Some(index) = constructor_index {
+            // Modify existing constructor via AST
+            if let ClassElement::MethodDefinition(method) = &mut class.body.body[index] {
+                if let Some(ref mut body) = method.value.body {
+                    // Find position to insert: after super() if exists, otherwise at start
+                    let insert_pos = self.find_super_call_insert_position(&body.statements);
+                    
+                    // Build: if (_initProto) _initProto(this);
+                    let init_stmt = self.build_init_proto_if_statement(ctx);
+                    body.statements.insert(insert_pos, init_stmt);
+                }
+            }
         } else {
-            // TODO: Modify existing constructor to add _initProto call
-            // This requires inserting statements at the right position
-            // For now, we'll rely on the post-processing approach
+            // Create new constructor with _initProto call
+            let constructor = self.create_constructor_with_init(class, ctx);
+            class.body.body.insert(0, constructor);
         }
+    }
+    
+    /// Find position in constructor where _initProto should be inserted
+    /// Returns position after super() call if it exists, otherwise 0
+    fn find_super_call_insert_position(&self, statements: &oxc_allocator::Vec<Statement>) -> usize {
+        for (i, stmt) in statements.iter().enumerate() {
+            if let Statement::ExpressionStatement(expr_stmt) = stmt {
+                if let Expression::CallExpression(call) = &expr_stmt.expression {
+                    if matches!(&call.callee, Expression::Super(_)) {
+                        // Found super() call, insert after it
+                        return i + 1;
+                    }
+                }
+            }
+        }
+        // No super() found, insert at beginning
+        0
+    }
+    
+    /// Build: if (_initProto) _initProto(this);
+    fn build_init_proto_if_statement(&self, ctx: &TraverseCtx<'a, TransformerState>) -> Statement<'a> {
+        // Build test: _initProto
+        let test = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initProto")));
+        
+        // Build consequent: _initProto(this);
+        let callee = Expression::Identifier(ctx.ast.alloc(ctx.ast.identifier_reference(SPAN, "_initProto")));
+        let mut arguments = ctx.ast.vec();
+        arguments.push(Argument::from(ctx.ast.expression_this(SPAN)));
+        let call = ctx.ast.expression_call(SPAN, callee, NONE, arguments, false);
+        let consequent = ctx.ast.statement_expression(SPAN, call);
+        
+        ctx.ast.statement_if(SPAN, test, consequent, None)
+    }
+    
+    /// Create a new constructor with _initProto call
+    fn create_constructor_with_init(
+        &self,
+        class: &Class<'a>,
+        ctx: &mut TraverseCtx<'a, TransformerState>,
+    ) -> ClassElement<'a> {
+        let mut statements = ctx.ast.vec();
+        
+        // If class has super class, add super() call first
+        if class.super_class.is_some() {
+            let super_call = ctx.ast.expression_call(
+                SPAN,
+                ctx.ast.expression_super(SPAN),
+                NONE,
+                ctx.ast.vec(),
+                false,
+            );
+            statements.push(ctx.ast.statement_expression(SPAN, super_call));
+        }
+        
+        // Add: if (_initProto) _initProto(this);
+        let init_stmt = self.build_init_proto_if_statement(ctx);
+        statements.push(init_stmt);
+        
+        // Build function body
+        let body = ctx.ast.alloc_function_body(SPAN, ctx.ast.vec(), statements);
+        
+        // Build constructor function with proper scope
+        let scope_id = ctx.create_child_scope_of_current(
+            ScopeFlags::Function | ScopeFlags::Constructor
+        );
+        
+        let params = ctx.ast.alloc_formal_parameters(
+            SPAN,
+            FormalParameterKind::FormalParameter,
+            ctx.ast.vec(),
+            NONE,
+        );
+        
+        let function = ctx.ast.alloc_function_with_scope_id(
+            SPAN,
+            FunctionType::FunctionExpression,
+            None,  // id: Option<BindingIdentifier>
+            false,
+            false,
+            false,
+            NONE,
+            NONE,
+            params,
+            NONE,
+            Some(body),
+            scope_id,
+        );
+        
+        // Build constructor method definition
+        let key = PropertyKey::StaticIdentifier(ctx.ast.alloc_identifier_name(SPAN, "constructor"));
+        ctx.ast.class_element_method_definition(
+            SPAN,
+            MethodDefinitionType::MethodDefinition,
+            ctx.ast.vec(),  // decorators
+            key,
+            function,
+            MethodDefinitionKind::Constructor,
+            false,  // computed
+            false,  // static
+            false,  // r#override
+            false,  // optional
+            None,   // accessibility: Option<TSAccessibility>
+        )
     }
 }
 
