@@ -10,11 +10,13 @@ A Vite plugin for transforming TC39 Stage 3 decorators using Rust/WASM (oxc v0.9
 - `addInitializer` API support with private and static members
 - Rust/WASM transformer with zero runtime dependencies
 
-## Installation
+## Build
 
 ```bash
-npm install vite-oxc-decorator-stage-3
+npm install
+npm run build
 ```
+copy pkg/ and dist/ and use dist/index.js as vite plugin
 
 ## Usage
 
@@ -36,11 +38,6 @@ interface ViteOxcDecoratorOptions {
   exclude?: RegExp | RegExp[];  // Default: [/node_modules/]
 }
 ```
-
-## Requirements
-
-- Vite 4.x or 5.x
-- Node.js 16+
 
 ## License
 
